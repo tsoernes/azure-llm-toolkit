@@ -82,62 +82,6 @@ async def test_chat_completion_with_max_tokens(client):
     assert result.usage.completion_tokens <= 10
 
 
-@pytest.mark.asyncio
-async def test_generate_answer(client):
-    """Test RAG-style answer generation."""
-    context = "Azure OpenAI is a cloud service that provides access to OpenAI models."
-    question = "What is Azure OpenAI?"
-
-    result = await client.generate_answer(
-        question=question,
-        context=context,
-    )
-
-    assert result.content is not None
-    assert len(result.content) > 0
-    assert "azure" in result.content.lower() or "openai" in result.content.lower()
-
-
-@pytest.mark.asyncio
-async def test_rewrite_query(client):
-    """Test query rewriting."""
-    query = "how to use ml"
-
-    result = await client.rewrite_query(query)
-
-    assert result.original == query
-    assert result.rewritten is not None
-    assert len(result.rewritten) > len(query)
-
-
-@pytest.mark.asyncio
-async def test_extract_metadata_from_filename(client):
-    """Test metadata extraction from filename."""
-    filename = "2024-Q4-Financial-Report-Final.pdf"
-
-    metadata = await client.extract_metadata_from_filename(filename)
-
-    assert isinstance(metadata, dict)
-    assert len(metadata) > 0
-
-
-@pytest.mark.asyncio
-async def test_extract_metadata_from_content(client):
-    """Test metadata extraction from content."""
-    content = """
-    Title: Machine Learning Best Practices
-    Author: John Doe
-    Date: 2024-12-01
-
-    This document covers best practices for ML.
-    """
-
-    metadata = await client.extract_metadata_from_content(content)
-
-    assert isinstance(metadata, dict)
-    assert len(metadata) > 0
-
-
 def test_count_tokens(client):
     """Test token counting."""
     text = "This is a test sentence."

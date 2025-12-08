@@ -192,9 +192,14 @@ class PolarsBatchEmbedder:
         show_progress: bool = True,
     ) -> tuple[list[npt.NDArray[np.float64]], dict[str, Any]]:
         """
-        Embed a list of texts.
+        Embed a list of texts with intelligent batching and rate limiting.
 
-        Handles texts exceeding token limits by splitting and averaging.
+        This method automatically:
+        - Tokenizes all texts
+        - Splits texts exceeding token limits
+        - Creates intelligent batches respecting TPM/RPM limits
+        - Applies rate limiting between batches
+        - Performs weighted averaging for split texts
 
         Args:
             texts: List of texts to embed
@@ -202,11 +207,27 @@ class PolarsBatchEmbedder:
 
         Returns:
             Tuple of (embeddings, metadata) where metadata includes token counts and cost
+
+        Example:
+            >>> embedder = PolarsBatchEmbedder(config)
+            >>> embeddings, metadata = await embedder.embed_texts(["text1", "text2"])
+            >>> print(f"Embedded {metadata['num_texts']} texts")
         """
+        import asyncio
+
+        if not texts:
+            return [], {
+                "total_tokens": 0,
+                "num_texts": 0,
+                "num_splits": 0,
+                "estimated_cost": 0.0,
+                "currency": self.cost_estimator.currency,
+            }
+
         # Tokenize all texts
         token_lists = self.encoder.encode_batch(texts, num_threads=multiprocessing.cpu_count())
 
-        # Split long texts
+        # Split long texts and track which texts were split
         split_token_lists = []
         split_lengths = []
         total_tokens = 0
@@ -217,11 +238,58 @@ class PolarsBatchEmbedder:
             split_lengths.append([len(part) for part in parts])
             total_tokens += len(tokens)
 
-        # Embed all parts
-        embeddings = await self._embed_token_lists(split_token_lists)
+        # Create batches respecting TPM and list count limits
+        batches = []
+        current_batch = []
+        current_batch_tokens = 0
+        current_batch_lists = 0
+
+        for token_list in split_token_lists:
+            token_count = len(token_list)
+            n_lists = 1
+
+            # Check if adding this would exceed limits
+            if (
+                current_batch_tokens + token_count >= self.max_tokens_per_minute
+                or current_batch_lists + n_lists >= self.max_lists_per_query
+            ):
+                if current_batch:
+                    batches.append(current_batch)
+                current_batch = [token_list]
+                current_batch_tokens = token_count
+                current_batch_lists = n_lists
+            else:
+                current_batch.append(token_list)
+                current_batch_tokens += token_count
+                current_batch_lists += n_lists
+
+        # Add final batch
+        if current_batch:
+            batches.append(current_batch)
+
+        # Process batches with progress bar and rate limiting
+        all_embeddings = []
+        iterator = tqdm(batches, desc="Embedding batches", disable=not show_progress)
+
+        for batch_idx, batch in enumerate(iterator):
+            try:
+                batch_embeddings = await self._embed_token_lists(batch)
+                all_embeddings.extend(batch_embeddings)
+
+                # Sleep between batches to respect rate limits (except last batch)
+                if batch_idx < len(batches) - 1:
+                    await asyncio.sleep(self.sleep_sec)
+
+            except RateLimitError as e:
+                logger.warning(f"Rate limited on batch {batch_idx}. Sleeping {self.sleep_sec}s. Error: {e}")
+                await asyncio.sleep(self.sleep_sec)
+                self.sleep_sec += self.sleep_inc
+                # Retry the batch
+                batch_embeddings = await self._embed_token_lists(batch)
+                all_embeddings.extend(batch_embeddings)
 
         # Average split embeddings
-        final_embeddings = self._weighted_average_embeddings(embeddings, split_lengths)
+        final_embeddings = self._weighted_average_embeddings(all_embeddings, split_lengths)
 
         # Calculate cost
         cost = self.cost_estimator.estimate_cost(
@@ -233,187 +301,12 @@ class PolarsBatchEmbedder:
             "total_tokens": total_tokens,
             "num_texts": len(texts),
             "num_splits": len(split_token_lists),
+            "num_batches": len(batches),
             "estimated_cost": cost,
             "currency": self.cost_estimator.currency,
         }
 
         return final_embeddings, metadata
-
-    def _tokenize_dataframe(
-        self,
-        df: pl.DataFrame,
-        text_column: str,
-        verbose: bool = True,
-    ) -> pl.DataFrame:
-        """
-        Tokenize text column in DataFrame.
-
-        Adds columns:
-        - {text_column}.tokens: List of token IDs
-        - {text_column}.token_count: Number of tokens
-
-        Args:
-            df: Polars DataFrame
-            text_column: Name of text column
-            verbose: Whether to print statistics
-
-        Returns:
-            DataFrame with added token columns
-        """
-        tokens_column = f"{text_column}.tokens"
-        token_count_column = f"{text_column}.token_count"
-
-        start_time = datetime.now()
-
-        # Tokenize using multiple CPU cores
-        texts = df[text_column].to_list()
-        tokens = self.encoder.encode_batch(texts, num_threads=multiprocessing.cpu_count())
-
-        # Add token columns
-        df = df.with_columns(
-            [
-                pl.Series(tokens_column, tokens),
-            ]
-        )
-
-        df = df.with_columns(
-            [
-                pl.col(tokens_column).list.len().alias(token_count_column),
-            ]
-        )
-
-        if verbose:
-            total = df[token_count_column].sum()
-            mean = df[token_count_column].mean()
-            min_val = df[token_count_column].min()
-            max_val = df[token_count_column].max()
-            elapsed = datetime.now() - start_time
-
-            logger.info(f"Tokenized {total:,} tokens in {elapsed}. Mean: {mean:.1f}, Min: {min_val}, Max: {max_val}")
-
-        return df
-
-    def _create_batches(
-        self,
-        df: pl.DataFrame,
-        token_count_column: str,
-    ) -> pl.DataFrame:
-        """
-        Assign batch IDs based on token and list count limits.
-
-        Ensures that:
-        - Each batch stays under max_tokens_per_minute
-        - Each batch has fewer than max_lists_per_query texts
-
-        Args:
-            df: DataFrame with token counts
-            token_count_column: Name of token count column
-
-        Returns:
-            DataFrame with added 'batch_id' column
-        """
-        # Calculate number of sub-lists each text will be split into
-        df = df.with_columns(
-            (pl.col(token_count_column) / self.max_tokens_per_row).ceil().cast(pl.Int32).alias("n_lists")
-        )
-
-        batch_ids = np.zeros(len(df), dtype=np.int32)
-        batch_n_tokens = [0]
-        batch_n_lists = [0]
-        batch_id = 0
-
-        # Iterate through rows to assign batch IDs
-        for ix, (token_count, n_lists) in enumerate(df.select([token_count_column, "n_lists"]).iter_rows()):
-            # Check if we need to start a new batch
-            if (
-                batch_n_tokens[batch_id] + token_count >= self.max_tokens_per_minute
-                or batch_n_lists[batch_id] + n_lists >= self.max_lists_per_query
-            ):
-                batch_id += 1
-                batch_n_tokens.append(token_count)
-                batch_n_lists.append(n_lists)
-            else:
-                batch_n_tokens[batch_id] += token_count
-                batch_n_lists[batch_id] += n_lists
-
-            batch_ids[ix] = batch_id
-
-        return df.with_columns(pl.Series("batch_id", batch_ids)).drop("n_lists")
-
-    async def _process_batch(
-        self,
-        batch: pl.DataFrame,
-        tokens_column: str,
-        token_count_column: str,
-        embedding_column: str,
-        retry_count: int = 0,
-    ) -> pl.DataFrame:
-        """
-        Process a single batch of texts.
-
-        Args:
-            batch: Batch DataFrame
-            tokens_column: Name of tokens column
-            token_count_column: Name of token count column
-            embedding_column: Name to use for embedding column
-            retry_count: Number of retries attempted
-
-        Returns:
-            DataFrame with added embedding column
-        """
-        token_lists = batch[tokens_column].to_list()
-        n_tokens = batch[token_count_column].sum()
-
-        assert n_tokens < self.max_tokens_per_minute, f"Batch exceeds token limit: {n_tokens}"
-
-        try:
-            # Split long texts
-            split_token_lists = []
-            split_lengths = []
-
-            for tokens in token_lists:
-                parts = self._split_tokens(tokens)
-                split_token_lists.extend(parts)
-                split_lengths.append([len(part) for part in parts])
-
-            # Embed
-            embeddings = await self._embed_token_lists(split_token_lists)
-
-            # Average split embeddings
-            final_embeddings = self._weighted_average_embeddings(embeddings, split_lengths)
-
-            # Convert to Polars Series
-            embedding_length = len(final_embeddings[0])
-            embedding_series = pl.Series(
-                embedding_column,
-                final_embeddings,
-                dtype=pl.Array(pl.Float64, embedding_length),
-            )
-
-            return batch.with_columns(embedding_series)
-
-        except RateLimitError as e:
-            logger.warning(
-                f"Rate limited on batch (retry {retry_count}). "
-                f"Sleeping {self.sleep_sec}s and increasing sleep time by {self.sleep_inc}s. "
-                f"Error: {e}"
-            )
-            import asyncio
-
-            await asyncio.sleep(self.sleep_sec)
-            self.sleep_sec += self.sleep_inc
-            return await self._process_batch(
-                batch, tokens_column, token_count_column, embedding_column, retry_count + 1
-            )
-
-        except (InternalServerError, APIConnectionError) as e:
-            logger.warning(f"API error on batch (retry {retry_count}). Sleeping {self.sleep_sec}s. Error: {e}")
-            import asyncio
-
-            await asyncio.sleep(self.sleep_sec)
-            return await self._process_batch(
-                batch, tokens_column, token_count_column, embedding_column, retry_count + 1
-            )
 
     async def embed_dataframe(
         self,
@@ -439,9 +332,8 @@ class PolarsBatchEmbedder:
         Returns:
             DataFrame with added embedding columns
         """
-        tokens_column = f"{text_column}.tokens"
-        token_count_column = f"{text_column}.token_count"
         embedding_column = f"{text_column}.embedding"
+        token_count_column = f"{text_column}.token_count"
 
         # Initialize embedding column if it doesn't exist
         if embedding_column not in df.columns:
@@ -457,65 +349,54 @@ class PolarsBatchEmbedder:
             logger.info("No texts to embed (all already embedded)")
             return df
 
-        # Tokenize
-        df_to_embed = self._tokenize_dataframe(df_to_embed, text_column, verbose=verbose)
+        # Extract texts to embed
+        texts_to_embed = df_to_embed[text_column].to_list()
 
-        # Create batches
-        df_to_embed = self._create_batches(df_to_embed, token_count_column)
+        if verbose:
+            logger.info(f"Embedding {len(texts_to_embed)} texts...")
 
-        # Calculate cost estimate
-        total_tokens = df_to_embed[token_count_column].sum()
-        estimated_cost = self.cost_estimator.estimate_cost(
-            model=self.config.embedding_deployment,
-            tokens_input=total_tokens,
+        # Use embed_texts for actual embedding (handles batching, rate limiting, etc.)
+        embeddings, metadata = await self.embed_texts(texts_to_embed, show_progress=verbose)
+
+        if verbose:
+            logger.info(
+                f"Embedded {metadata['num_texts']} texts. "
+                f"Total tokens: {metadata['total_tokens']:,}. "
+                f"Estimated cost: {metadata['estimated_cost']:.4f} {metadata['currency']}"
+            )
+
+        # Add embeddings and token counts to DataFrame
+        embedding_length = len(embeddings[0])
+
+        # Tokenize to get token counts (reuse from embed_texts processing)
+        token_counts = [self.config.count_tokens(text) for text in texts_to_embed]
+
+        df_to_embed = df_to_embed.with_columns(
+            [
+                pl.Series(embedding_column, embeddings, dtype=pl.Array(pl.Float64, embedding_length)),
+                pl.Series(token_count_column, token_counts),
+            ]
         )
 
-        if verbose:
-            n_batches = df_to_embed["batch_id"].n_unique()
-            logger.info(
-                f"Embedding {len(df_to_embed)} texts in {n_batches} batches. "
-                f"Total tokens: {total_tokens:,}. "
-                f"Estimated cost: {estimated_cost:.4f} {self.cost_estimator.currency}"
-            )
-
-        start_time = datetime.now()
-
-        # Process batches
-        embedded_batches = []
-        for _, batch in tqdm(
-            df_to_embed.group_by("batch_id"),
-            desc="Embedding batches",
-            disable=not verbose,
-            total=df_to_embed["batch_id"].n_unique(),
-        ):
-            embedded_batch = await self._process_batch(
-                batch,
-                tokens_column,
-                token_count_column,
-                embedding_column,
-            )
-            embedded_batches.append(embedded_batch)
-
-        # Concatenate results
-        result_df = pl.concat(embedded_batches)
-
-        if verbose:
-            elapsed = datetime.now() - start_time
-            logger.info(f"Embedded {len(result_df)} texts in {elapsed}")
-
         # Merge back with original DataFrame (for rows that weren't embedded)
-        # This preserves rows with null text or existing embeddings
-        if not re_embed and len(df) > len(result_df):
+        if not re_embed and len(df) > len(df_to_embed):
             # Get rows that weren't embedded
             df_not_embedded = df.filter(pl.col(text_column).is_null() | pl.col(embedding_column).is_not_null())
 
             # Add missing columns to df_not_embedded
-            for col in result_df.columns:
+            for col in df_to_embed.columns:
                 if col not in df_not_embedded.columns:
-                    df_not_embedded = df_not_embedded.with_columns(pl.lit(None).alias(col))
+                    if col == embedding_column:
+                        df_not_embedded = df_not_embedded.with_columns(
+                            pl.lit(None).cast(pl.Array(pl.Float64, embedding_length)).alias(col)
+                        )
+                    else:
+                        df_not_embedded = df_not_embedded.with_columns(pl.lit(None).alias(col))
 
             # Concatenate
-            result_df = pl.concat([result_df, df_not_embedded])
+            result_df = pl.concat([df_to_embed, df_not_embedded])
+        else:
+            result_df = df_to_embed
 
         return result_df
 
