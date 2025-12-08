@@ -280,17 +280,23 @@ class CostTracker(Protocol):
 
 
 class InMemoryCostTracker:
-    """Simple in-memory cost tracker for testing or temporary tracking."""
+    """Simple in-memory cost tracker for testing or temporary tracking.
 
-    def __init__(self, currency: str = "kr") -> None:
+    This tracker keeps entries in memory and (optionally) appends them to a JSONL file
+    so that cost and usage data is persisted across runs.
+    """
+
+    def __init__(self, currency: str = "kr", file_path: str | None = None) -> None:
         """
         Initialize in-memory cost tracker.
 
         Args:
             currency: Default currency code
+            file_path: Optional path to a JSONL file for persisting entries.
         """
         self.currency = currency
         self._entries: list[dict[str, Any]] = []
+        self._file_path = file_path
 
     def record_cost(
         self,
@@ -304,6 +310,10 @@ class InMemoryCostTracker:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record a cost entry."""
+        from datetime import datetime
+        import json
+        from pathlib import Path
+
         entry = {
             "category": category,
             "model": model,
@@ -313,8 +323,20 @@ class InMemoryCostTracker:
             "currency": currency,
             "amount": amount,
             "metadata": metadata or {},
+            "timestamp": datetime.utcnow().isoformat(),
         }
         self._entries.append(entry)
+
+        # Append to JSONL file if configured
+        if self._file_path:
+            try:
+                path = Path(self._file_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry) + "\n")
+            except Exception as e:
+                # Persistence is best-effort; do not fail the main flow
+                logger.warning(f"Failed to persist cost entry to file '{self._file_path}': {e}")
 
     def get_total_cost(self, category: str | None = None) -> float:
         """Get total cost, optionally filtered by category."""

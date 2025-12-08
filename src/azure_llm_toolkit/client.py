@@ -73,9 +73,10 @@ class AzureLLMClient:
     - Cost tracking and estimation
     - Batch embedding support
     - Chat completions with reasoning support
-    - Query rewriting utilities
     - Token counting
     - Disk-based caching for embeddings and chat completions
+    - Optional metrics tracking integration
+    - Hooks for streaming and function calling
     """
 
     def __init__(
@@ -88,6 +89,7 @@ class AzureLLMClient:
         enable_rate_limiting: bool = True,
         cache_manager: CacheManager | None = None,
         enable_cache: bool = True,
+        metrics_collector: MetricsCollector | None = None,
     ) -> None:
         """
         Initialize Azure LLM client.
@@ -108,6 +110,7 @@ class AzureLLMClient:
         self.cost_tracker = cost_tracker
         self.enable_rate_limiting = enable_rate_limiting
         self.enable_cache = enable_cache
+        self.metrics_collector = metrics_collector
 
         if enable_rate_limiting:
             self.rate_limiter_pool = rate_limiter_pool or RateLimiterPool()
@@ -153,12 +156,24 @@ class AzureLLMClient:
         """
         model = model or self.config.embedding_deployment
 
+        # Metrics tracker (optional)
+        metrics_tracker = None
+        if self.metrics_collector is not None:
+            metrics_tracker = MetricsTracker(self.metrics_collector).track(
+                operation="embed_text",
+                model=model,
+            )
+
         # Check cache if enabled
         if use_cache and self.enable_cache and self.cache_manager:
             cached_embedding = self.cache_manager.embedding_cache.get(text, model)
             if cached_embedding is not None:
                 logger.debug("Cache hit for single text embedding")
-                return cached_embedding.tolist()
+                embedding_list = cached_embedding.tolist()
+                if metrics_tracker is not None:
+                    metrics_tracker.set_tokens(input=self.config.count_tokens(text), cached=len(embedding_list))
+                    metrics_tracker.set_cost(0.0)
+                return embedding_list
 
         # Rate limiting
         if self.enable_rate_limiting and self.rate_limiter_pool:
@@ -181,8 +196,9 @@ class AzureLLMClient:
             self.cache_manager.embedding_cache.set(text, model, np.array(embedding))
 
         # Track cost if enabled
+        tokens = response.usage.total_tokens if response.usage else self.config.count_tokens(text)
+        cost = 0.0
         if track_cost and self.cost_tracker:
-            tokens = response.usage.total_tokens if response.usage else self.config.count_tokens(text)
             cost = self.cost_estimator.estimate_cost(model=model, tokens_input=tokens)
             self.cost_tracker.record_cost(
                 category="embedding",
@@ -192,7 +208,12 @@ class AzureLLMClient:
                 tokens_cached_input=0,
                 currency=self.cost_estimator.currency,
                 amount=cost,
+                metadata={"operation": "embed_text"},
             )
+
+        if metrics_tracker is not None:
+            metrics_tracker.set_tokens(input=tokens, output=0, cached=0)
+            metrics_tracker.set_cost(cost)
 
         return embedding
 
@@ -216,6 +237,8 @@ class AzureLLMClient:
         response_format: Any | None = None,
         track_cost: bool = True,
         use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
     ) -> ChatCompletionResult:
         """
         Perform a chat completion with usage tracking.
@@ -235,6 +258,14 @@ class AzureLLMClient:
             ChatCompletionResult with content and usage info
         """
         model = model or self.config.chat_deployment
+
+        # Metrics tracker (optional)
+        metrics_tracker = None
+        if self.metrics_collector is not None:
+            metrics_tracker = MetricsTracker(self.metrics_collector).track(
+                operation="chat_completion",
+                model=model,
+            )
 
         # Build messages
         full_messages: list[dict[str, str]] = []
@@ -280,6 +311,10 @@ class AzureLLMClient:
             kwargs["reasoning_effort"] = reasoning_effort
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools is not None:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
 
         # Make API call with retry on specific errors
         max_attempts = 3
@@ -300,6 +335,7 @@ class AzureLLMClient:
                     limiter.update_usage(actual_tokens, estimated_total)
 
                 # Track cost
+                cost = 0.0
                 if track_cost and self.cost_tracker:
                     cost = self.cost_estimator.estimate_cost_from_usage(model, usage)
                     self.cost_tracker.record_cost(
@@ -310,7 +346,16 @@ class AzureLLMClient:
                         tokens_cached_input=usage.cached_prompt_tokens,
                         currency=self.cost_estimator.currency,
                         amount=cost,
+                        metadata={"operation": "chat_completion"},
                     )
+
+                if metrics_tracker is not None:
+                    metrics_tracker.set_tokens(
+                        input=usage.prompt_tokens,
+                        output=usage.completion_tokens,
+                        cached=usage.cached_prompt_tokens,
+                    )
+                    metrics_tracker.set_cost(cost)
 
                 return ChatCompletionResult(
                     content=content,
@@ -376,6 +421,79 @@ class AzureLLMClient:
         if last_error:
             raise last_error
         raise RuntimeError("Chat completion failed after all retry attempts")
+
+    async def chat_completion_stream(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        """
+        Stream chat completion tokens as they arrive.
+
+        This method yields chunks of content (strings) as they are produced by the model.
+        It is intended for real-time streaming use cases (e.g., terminal UIs, web sockets).
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            system_prompt: Optional system prompt (prepended to messages)
+            model: Optional model override
+            temperature: Temperature parameter (not supported by all models)
+            max_tokens: Maximum tokens to generate
+            reasoning_effort: Reasoning effort for o1/GPT-5 models ("low", "medium", "high")
+            response_format: Response format (e.g., {"type": "json_object"})
+            tools: Optional list of tool/function definitions for function calling
+            tool_choice: Tool choice configuration for function calling
+
+        Yields:
+            Content chunks as strings
+        """
+        model = model or self.config.chat_deployment
+
+        # Build messages
+        full_messages: list[dict[str, str]] = []
+        if system_prompt:
+            full_messages.append({"role": "system", "content": system_prompt})
+        full_messages.extend(messages)
+
+        # Build API kwargs
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": full_messages,
+            "stream": True,
+        }
+
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        if tools is not None:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+
+        # Call streaming API
+        async with self.client.chat.completions.stream(**kwargs) as stream:  # type: ignore[attr-defined]
+            async for event in stream:
+                # Expect chunks with choices and delta content
+                try:
+                    choice = event.choices[0]
+                    delta = getattr(choice, "delta", None)
+                    if delta and getattr(delta, "content", None):
+                        yield delta.content
+                except Exception as e:
+                    logger.debug(f"Streaming chunk parsing failed: {e}")
+                    continue
 
     # ==================== Token Counting ====================
 
