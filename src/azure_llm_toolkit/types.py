@@ -1,0 +1,125 @@
+"""Shared types and data structures for azure-llm-toolkit."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class UsageInfo:
+    """Token usage information from API calls."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cached_prompt_tokens: int = 0
+
+    @classmethod
+    def from_openai_usage(cls, usage: Any) -> UsageInfo:
+        """Create UsageInfo from OpenAI API response usage object."""
+        if usage is None:
+            return cls()
+        return cls(
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            total_tokens=getattr(usage, "total_tokens", 0) or 0,
+            cached_prompt_tokens=getattr(usage, "prompt_tokens_details", {}).get("cached_tokens", 0)
+            if hasattr(usage, "prompt_tokens_details")
+            else 0,
+        )
+
+    def to_dict(self) -> dict[str, int]:
+        """Convert to dictionary."""
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "cached_prompt_tokens": self.cached_prompt_tokens,
+        }
+
+
+@dataclass
+class CostInfo:
+    """Cost information for API calls."""
+
+    currency: str
+    amount: float
+    tokens_input: int
+    tokens_output: int
+    tokens_cached_input: int
+    model: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "currency": self.currency,
+            "amount": self.amount,
+            "tokens_input": self.tokens_input,
+            "tokens_output": self.tokens_output,
+            "tokens_cached_input": self.tokens_cached_input,
+            "model": self.model,
+        }
+
+
+@dataclass
+class ChatCompletionResult:
+    """Result from a chat completion call with usage tracking."""
+
+    content: str
+    usage: UsageInfo
+    model: str
+    finish_reason: str | None = None
+    raw_response: Any | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "content": self.content,
+            "usage": self.usage.to_dict(),
+            "model": self.model,
+            "finish_reason": self.finish_reason,
+        }
+
+
+@dataclass
+class EmbeddingResult:
+    """Result from an embedding call."""
+
+    embeddings: list[list[float]]
+    model: str
+    usage: UsageInfo
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "embeddings": self.embeddings,
+            "model": self.model,
+            "usage": self.usage.to_dict(),
+        }
+
+
+@dataclass
+class QueryRewriteResult:
+    """Result from query rewriting."""
+
+    original: str
+    rewritten: str
+    raw_response: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "original": self.original,
+            "rewritten": self.rewritten,
+            "raw_response": self.raw_response,
+        }
+
+
+__all__ = [
+    "UsageInfo",
+    "CostInfo",
+    "ChatCompletionResult",
+    "EmbeddingResult",
+    "QueryRewriteResult",
+]
