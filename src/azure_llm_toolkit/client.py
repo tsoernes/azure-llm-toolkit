@@ -25,6 +25,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from .cache import CacheManager, ChatCache, EmbeddingCache
 from .config import AzureConfig
 from .cost_tracker import CostEstimator, CostTracker
 from .rate_limiter import RateLimiter, RateLimiterPool
@@ -74,6 +75,7 @@ class AzureLLMClient:
     - Chat completions with reasoning support
     - Query rewriting utilities
     - Token counting
+    - Disk-based caching for embeddings and chat completions
     """
 
     def __init__(
@@ -84,6 +86,8 @@ class AzureLLMClient:
         cost_tracker: CostTracker | None = None,
         rate_limiter_pool: RateLimiterPool | None = None,
         enable_rate_limiting: bool = True,
+        cache_manager: CacheManager | None = None,
+        enable_cache: bool = True,
     ) -> None:
         """
         Initialize Azure LLM client.
@@ -95,17 +99,25 @@ class AzureLLMClient:
             cost_tracker: Optional cost tracker for recording costs
             rate_limiter_pool: Rate limiter pool (will create default if not provided)
             enable_rate_limiting: Whether to enable rate limiting
+            cache_manager: Cache manager instance (will create default if not provided)
+            enable_cache: Whether to enable disk-based caching
         """
         self.config = config or AzureConfig()
         self.client = client or self.config.create_client()
         self.cost_estimator = cost_estimator or CostEstimator(currency="kr")
         self.cost_tracker = cost_tracker
         self.enable_rate_limiting = enable_rate_limiting
+        self.enable_cache = enable_cache
 
         if enable_rate_limiting:
             self.rate_limiter_pool = rate_limiter_pool or RateLimiterPool()
         else:
             self.rate_limiter_pool = None
+
+        if enable_cache:
+            self.cache_manager = cache_manager or CacheManager()
+        else:
+            self.cache_manager = None
 
     # ==================== Embeddings ====================
 
@@ -153,6 +165,7 @@ class AzureLLMClient:
         batch_size: int = 100,
         model: str | None = None,
         track_cost: bool = True,
+        use_cache: bool = True,
     ) -> EmbeddingResult:
         """
         Embed multiple texts with automatic batching.
@@ -162,6 +175,7 @@ class AzureLLMClient:
             batch_size: Maximum batch size for API calls
             model: Optional model override
             track_cost: Whether to track cost (requires cost_tracker)
+            use_cache: Whether to use cache for embeddings
 
         Returns:
             EmbeddingResult with embeddings and usage info
@@ -173,15 +187,53 @@ class AzureLLMClient:
         all_embeddings: list[list[float]] = []
         total_tokens = 0
 
-        # Process in batches
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            batch_embeddings = await self._embed_batch(batch, model=model)
-            all_embeddings.extend(batch_embeddings)
+        # Check cache if enabled
+        if use_cache and self.enable_cache and self.cache_manager:
+            cached_embeddings, missing_indices = self.cache_manager.embedding_cache.get_batch(texts, model)
 
-            # Estimate tokens for this batch
-            batch_tokens = sum(self.config.count_tokens(t) for t in batch)
-            total_tokens += batch_tokens
+            # If all embeddings are cached
+            if not missing_indices:
+                logger.debug(f"All {len(texts)} embeddings found in cache")
+                all_embeddings = [emb.tolist() for emb in cached_embeddings]  # type: ignore
+                # Estimate tokens for cached embeddings
+                total_tokens = sum(self.config.count_tokens(t) for t in texts)
+            else:
+                # Embed only missing texts
+                logger.debug(f"Cache hit for {len(texts) - len(missing_indices)}/{len(texts)} embeddings")
+                texts_to_embed = [texts[i] for i in missing_indices]
+
+                # Process missing texts in batches
+                new_embeddings_flat: list[list[float]] = []
+                for i in range(0, len(texts_to_embed), batch_size):
+                    batch = texts_to_embed[i : i + batch_size]
+                    batch_embeddings = await self._embed_batch(batch, model=model)
+                    new_embeddings_flat.extend(batch_embeddings)
+
+                    # Estimate tokens for this batch
+                    batch_tokens = sum(self.config.count_tokens(t) for t in batch)
+                    total_tokens += batch_tokens
+
+                # Cache new embeddings
+                for text, embedding in zip(texts_to_embed, new_embeddings_flat):
+                    self.cache_manager.embedding_cache.set(text, model, np.array(embedding))
+
+                # Merge cached and new embeddings
+                new_embeddings_iter = iter(new_embeddings_flat)
+                for i, cached_emb in enumerate(cached_embeddings):
+                    if cached_emb is None:
+                        all_embeddings.append(next(new_embeddings_iter))
+                    else:
+                        all_embeddings.append(cached_emb.tolist())
+        else:
+            # No cache - process all texts
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                batch_embeddings = await self._embed_batch(batch, model=model)
+                all_embeddings.extend(batch_embeddings)
+
+                # Estimate tokens for this batch
+                batch_tokens = sum(self.config.count_tokens(t) for t in batch)
+                total_tokens += batch_tokens
 
         usage = UsageInfo(prompt_tokens=total_tokens, total_tokens=total_tokens)
 
@@ -233,6 +285,7 @@ class AzureLLMClient:
         reasoning_effort: str | None = None,
         response_format: Any | None = None,
         track_cost: bool = True,
+        use_cache: bool = True,
     ) -> ChatCompletionResult:
         """
         Perform a chat completion with usage tracking.
@@ -246,6 +299,7 @@ class AzureLLMClient:
             reasoning_effort: Reasoning effort for o1/GPT-5 models ("low", "medium", "high")
             response_format: Response format (e.g., {"type": "json_object"})
             track_cost: Whether to track cost
+            use_cache: Whether to use cache for chat completions
 
         Returns:
             ChatCompletionResult with content and usage info
@@ -257,6 +311,24 @@ class AzureLLMClient:
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})
         full_messages.extend(messages)
+
+        # Check cache if enabled
+        if use_cache and self.enable_cache and self.cache_manager:
+            cached_response = self.cache_manager.chat_cache.get(
+                messages=full_messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if cached_response:
+                logger.debug("Cache hit for chat completion")
+                return ChatCompletionResult(
+                    content=cached_response["content"],
+                    usage=UsageInfo(**cached_response["usage"]),
+                    model=cached_response["model"],
+                    finish_reason=cached_response.get("finish_reason"),
+                    raw_response=None,
+                )
 
         # Estimate tokens for rate limiting
         if self.enable_rate_limiting and self.rate_limiter_pool:
@@ -317,6 +389,24 @@ class AzureLLMClient:
                     finish_reason=finish_reason,
                     raw_response=response,
                 )
+
+                # Cache the result
+                if use_cache and self.enable_cache and self.cache_manager:
+                    cache_data = {
+                        "content": content,
+                        "usage": usage.to_dict(),
+                        "model": model,
+                        "finish_reason": finish_reason,
+                    }
+                    self.cache_manager.chat_cache.set(
+                        messages=full_messages,
+                        model=model,
+                        response=cache_data,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+
+                return result
 
             except BadRequestError as e:
                 error_msg = str(e)

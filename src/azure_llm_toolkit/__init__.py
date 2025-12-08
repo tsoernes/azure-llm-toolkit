@@ -48,6 +48,8 @@ Example usage:
 
 from __future__ import annotations
 
+from .batch_embedder import PolarsBatchEmbedder
+from .cache import CacheManager, ChatCache, EmbeddingCache, LLMCache
 from .client import AzureLLMClient
 from .config import AzureConfig, detect_embedding_dimension
 from .cost_tracker import CostEstimator, CostTracker, InMemoryCostTracker
@@ -59,16 +61,6 @@ from .types import (
     QueryRewriteResult,
     UsageInfo,
 )
-
-# Optional batch embedder (requires polars)
-try:
-    from .batch_embedder import PolarsBatchEmbedder, PolarsNotAvailableError
-
-    _BATCH_EMBEDDER_AVAILABLE = True
-except ImportError:
-    _BATCH_EMBEDDER_AVAILABLE = False
-    PolarsBatchEmbedder = None  # type: ignore
-    PolarsNotAvailableError = None  # type: ignore
 
 __version__ = "0.1.0"
 
@@ -86,15 +78,19 @@ __all__ = [
     "RateLimiter",
     "RateLimiterPool",
     "get_rate_limiter_pool",
+    # Caching
+    "CacheManager",
+    "LLMCache",
+    "EmbeddingCache",
+    "ChatCache",
     # Types
     "UsageInfo",
     "CostInfo",
     "ChatCompletionResult",
     "EmbeddingResult",
     "QueryRewriteResult",
-    # Batch embedder (optional)
+    # Batch embedder
     "PolarsBatchEmbedder",
-    "PolarsNotAvailableError",
     # Version
     "__version__",
 ]

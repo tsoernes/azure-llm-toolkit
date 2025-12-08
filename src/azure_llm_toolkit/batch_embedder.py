@@ -28,28 +28,8 @@ from .cost_tracker import CostEstimator
 
 logger = logging.getLogger(__name__)
 
-try:
-    import polars as pl
-    from tqdm import tqdm
-
-    POLARS_AVAILABLE = True
-except ImportError:
-    POLARS_AVAILABLE = False
-    logger.warning("Polars not available. Install with: pip install polars")
-
-
-class PolarsNotAvailableError(ImportError):
-    """Raised when Polars is required but not installed."""
-
-    pass
-
-
-def _check_polars() -> None:
-    """Check if Polars is available and raise error if not."""
-    if not POLARS_AVAILABLE:
-        raise PolarsNotAvailableError(
-            "Polars is required for batch embedding. Install with: pip install 'azure-llm-toolkit[polars]'"
-        )
+import polars as pl
+from tqdm import tqdm
 
 
 class PolarsBatchEmbedder:
@@ -98,8 +78,6 @@ class PolarsBatchEmbedder:
             sleep_inc: Sleep time increment on consecutive errors (seconds)
             cost_estimator: Optional cost estimator for tracking
         """
-        _check_polars()
-
         self.config = config
         self.max_tokens_per_minute = max_tokens_per_minute
         self.max_tokens_per_row = max_tokens_per_row
@@ -282,8 +260,6 @@ class PolarsBatchEmbedder:
         Returns:
             DataFrame with added token columns
         """
-        _check_polars()
-
         tokens_column = f"{text_column}.tokens"
         token_count_column = f"{text_column}.token_count"
 
@@ -336,8 +312,6 @@ class PolarsBatchEmbedder:
         Returns:
             DataFrame with added 'batch_id' column
         """
-        _check_polars()
-
         # Calculate number of sub-lists each text will be split into
         df = df.with_columns(
             (pl.col(token_count_column) / self.max_tokens_per_row).ceil().cast(pl.Int32).alias("n_lists")
@@ -387,8 +361,6 @@ class PolarsBatchEmbedder:
         Returns:
             DataFrame with added embedding column
         """
-        _check_polars()
-
         token_lists = batch[tokens_column].to_list()
         n_tokens = batch[token_count_column].sum()
 
@@ -467,8 +439,6 @@ class PolarsBatchEmbedder:
         Returns:
             DataFrame with added embedding columns
         """
-        _check_polars()
-
         tokens_column = f"{text_column}.tokens"
         token_count_column = f"{text_column}.token_count"
         embedding_column = f"{text_column}.embedding"
@@ -552,5 +522,4 @@ class PolarsBatchEmbedder:
 
 __all__ = [
     "PolarsBatchEmbedder",
-    "PolarsNotAvailableError",
 ]

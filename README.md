@@ -7,6 +7,7 @@ A comprehensive Python library for working with Azure OpenAI APIs, featuring rat
 - **Automatic Rate Limiting**: Built-in TPM (Tokens Per Minute) and RPM (Requests Per Minute) rate limiting using token bucket algorithm
 - **Cost Tracking & Estimation**: Track and estimate costs for all API calls with configurable pricing
 - **Retry Logic**: Exponential backoff retry logic for handling transient failures
+- **Disk-Based Caching**: Cache embeddings and chat completions to disk to avoid redundant API calls and save costs
 - **Batch Processing**: Efficient batch embedding with automatic splitting
 - **High-Performance Batch Embedder**: Advanced Polars-based batch embedder for processing large datasets with intelligent batching and weighted averaging
 - **Chat Completions**: Support for chat completions with reasoning models (GPT-4o, o1, etc.)
@@ -19,12 +20,6 @@ A comprehensive Python library for working with Azure OpenAI APIs, featuring rat
 
 ```bash
 pip install azure-llm-toolkit
-```
-
-For high-performance batch embedding with Polars:
-
-```bash
-pip install azure-llm-toolkit[polars]
 ```
 
 Or install from source:
@@ -261,6 +256,50 @@ Features of the Polars batch embedder:
 - **Progress tracking**: Built-in tqdm progress bars
 - **High performance**: Uses multiprocessing for tokenization and Polars for data operations
 - **Disk caching**: Optional saving of intermediate results
+
+### Disk-Based Caching
+
+Save costs and improve performance by caching LLM responses:
+
+```python
+from azure_llm_toolkit import AzureConfig, AzureLLMClient, CacheManager
+
+# Create client with caching enabled (default)
+config = AzureConfig()
+client = AzureLLMClient(config=config, enable_cache=True)
+
+texts = ["Hello world", "Azure OpenAI", "Machine learning"]
+
+# First call - hits the API
+result1 = await client.embed_texts(texts, use_cache=True)
+print(f"Generated {len(result1.embeddings)} embeddings")
+
+# Second call - retrieves from cache (no API call, no cost!)
+result2 = await client.embed_texts(texts, use_cache=True)
+print(f"Retrieved {len(result2.embeddings)} embeddings from cache")
+
+# Works with chat completions too
+messages = [{"role": "user", "content": "What is AI?"}]
+response1 = await client.chat_completion(messages, use_cache=True)  # API call
+response2 = await client.chat_completion(messages, use_cache=True)  # From cache
+
+# Get cache statistics
+cache_manager = client.cache_manager
+stats = cache_manager.get_stats()
+print(f"Cache size: {stats['total_size_mb']:.2f} MB")
+print(f"Total files: {stats['total_files']}")
+
+# Clear cache when needed
+cache_manager.clear_all()
+```
+
+Features of the caching system:
+- **Automatic caching**: Embeddings and chat completions are automatically cached
+- **Content-based**: Cache keys based on content, model, and parameters
+- **Partial hits**: Smart handling of partial cache hits in batch operations
+- **Cost savings**: Avoid redundant API calls and reduce costs
+- **Custom directories**: Configure cache location
+- **Easy management**: Get stats and clear cache as needed
 
 ### Query Rewriting
 
