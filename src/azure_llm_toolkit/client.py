@@ -120,6 +120,7 @@ class AzureLLMClient:
             self.cache_manager = None
 
     # ==================== Embeddings ====================
+    # Note: For batch embedding, use PolarsBatchEmbedder instead
 
     @retry(
         reraise=True,
@@ -128,143 +129,72 @@ class AzureLLMClient:
         retry=retry_if_exception_type((APIConnectionError, RateLimitError, APITimeoutError, APIStatusError)),
         before_sleep=_log_retry_attempt,
     )
-    async def _embed_batch(self, texts: list[str], model: str | None = None) -> list[list[float]]:
+    async def embed_text(
+        self,
+        text: str,
+        model: str | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+    ) -> list[float]:
         """
-        Embed a batch of texts with retry logic.
+        Embed a single text.
+
+        For batch embedding of many texts, use PolarsBatchEmbedder instead,
+        which provides intelligent batching, rate limiting, and weighted averaging.
 
         Args:
-            texts: List of texts to embed
-            model: Optional model override (uses config default if not provided)
+            text: Text to embed
+            model: Optional model override
+            track_cost: Whether to track cost (requires cost_tracker)
+            use_cache: Whether to use cache for embedding
 
         Returns:
-            List of embedding vectors
+            Embedding vector
         """
         model = model or self.config.embedding_deployment
 
+        # Check cache if enabled
+        if use_cache and self.enable_cache and self.cache_manager:
+            cached_embedding = self.cache_manager.embedding_cache.get(text, model)
+            if cached_embedding is not None:
+                logger.debug("Cache hit for single text embedding")
+                return cached_embedding.tolist()
+
         # Rate limiting
         if self.enable_rate_limiting and self.rate_limiter_pool:
-            # Estimate tokens for rate limiting
-            total_tokens = sum(self.config.count_tokens(t) for t in texts)
+            tokens = self.config.count_tokens(text)
             limiter = await self.rate_limiter_pool.get_limiter(model)
-            await limiter.acquire(tokens=total_tokens)
+            await limiter.acquire(tokens=tokens)
 
-        response = await self.client.embeddings.create(model=model, input=texts)
+        response = await self.client.embeddings.create(model=model, input=[text])
 
-        embeddings = [item.embedding for item in response.data]
+        embedding = response.data[0].embedding
 
         # Update rate limiter with actual usage if available
         if self.enable_rate_limiting and self.rate_limiter_pool and response.usage:
             actual_tokens = response.usage.total_tokens
-            limiter.update_usage(actual_tokens, total_tokens)
+            estimated_tokens = self.config.count_tokens(text)
+            limiter.update_usage(actual_tokens, estimated_tokens)
 
-        return embeddings
-
-    async def embed_texts(
-        self,
-        texts: list[str],
-        batch_size: int = 100,
-        model: str | None = None,
-        track_cost: bool = True,
-        use_cache: bool = True,
-    ) -> EmbeddingResult:
-        """
-        Embed multiple texts with automatic batching.
-
-        Args:
-            texts: List of texts to embed
-            batch_size: Maximum batch size for API calls
-            model: Optional model override
-            track_cost: Whether to track cost (requires cost_tracker)
-            use_cache: Whether to use cache for embeddings
-
-        Returns:
-            EmbeddingResult with embeddings and usage info
-        """
-        if not texts:
-            return EmbeddingResult(embeddings=[], model=model or self.config.embedding_deployment, usage=UsageInfo())
-
-        model = model or self.config.embedding_deployment
-        all_embeddings: list[list[float]] = []
-        total_tokens = 0
-
-        # Check cache if enabled
+        # Cache the result
         if use_cache and self.enable_cache and self.cache_manager:
-            cached_embeddings, missing_indices = self.cache_manager.embedding_cache.get_batch(texts, model)
-
-            # If all embeddings are cached
-            if not missing_indices:
-                logger.debug(f"All {len(texts)} embeddings found in cache")
-                all_embeddings = [emb.tolist() for emb in cached_embeddings]  # type: ignore
-                # Estimate tokens for cached embeddings
-                total_tokens = sum(self.config.count_tokens(t) for t in texts)
-            else:
-                # Embed only missing texts
-                logger.debug(f"Cache hit for {len(texts) - len(missing_indices)}/{len(texts)} embeddings")
-                texts_to_embed = [texts[i] for i in missing_indices]
-
-                # Process missing texts in batches
-                new_embeddings_flat: list[list[float]] = []
-                for i in range(0, len(texts_to_embed), batch_size):
-                    batch = texts_to_embed[i : i + batch_size]
-                    batch_embeddings = await self._embed_batch(batch, model=model)
-                    new_embeddings_flat.extend(batch_embeddings)
-
-                    # Estimate tokens for this batch
-                    batch_tokens = sum(self.config.count_tokens(t) for t in batch)
-                    total_tokens += batch_tokens
-
-                # Cache new embeddings
-                for text, embedding in zip(texts_to_embed, new_embeddings_flat):
-                    self.cache_manager.embedding_cache.set(text, model, np.array(embedding))
-
-                # Merge cached and new embeddings
-                new_embeddings_iter = iter(new_embeddings_flat)
-                for i, cached_emb in enumerate(cached_embeddings):
-                    if cached_emb is None:
-                        all_embeddings.append(next(new_embeddings_iter))
-                    else:
-                        all_embeddings.append(cached_emb.tolist())
-        else:
-            # No cache - process all texts
-            for i in range(0, len(texts), batch_size):
-                batch = texts[i : i + batch_size]
-                batch_embeddings = await self._embed_batch(batch, model=model)
-                all_embeddings.extend(batch_embeddings)
-
-                # Estimate tokens for this batch
-                batch_tokens = sum(self.config.count_tokens(t) for t in batch)
-                total_tokens += batch_tokens
-
-        usage = UsageInfo(prompt_tokens=total_tokens, total_tokens=total_tokens)
+            self.cache_manager.embedding_cache.set(text, model, np.array(embedding))
 
         # Track cost if enabled
         if track_cost and self.cost_tracker:
-            cost = self.cost_estimator.estimate_cost_from_usage(model, usage)
+            tokens = response.usage.total_tokens if response.usage else self.config.count_tokens(text)
+            cost = self.cost_estimator.estimate_cost(model=model, tokens_input=tokens)
             self.cost_tracker.record_cost(
                 category="embedding",
                 model=model,
-                tokens_input=usage.prompt_tokens,
+                tokens_input=tokens,
                 tokens_output=0,
                 tokens_cached_input=0,
                 currency=self.cost_estimator.currency,
                 amount=cost,
             )
 
-        return EmbeddingResult(embeddings=all_embeddings, model=model, usage=usage)
-
-    async def embed_text(self, text: str, model: str | None = None) -> list[float]:
-        """
-        Embed a single text.
-
-        Args:
-            text: Text to embed
-            model: Optional model override
-
-        Returns:
-            Embedding vector
-        """
-        result = await self.embed_texts([text], model=model)
-        return result.embeddings[0]
+        return embedding
 
     # ==================== Chat Completions ====================
 
@@ -660,7 +590,9 @@ class AzureLLMClient:
 
     def estimate_embedding_cost(self, text: str, model: str | None = None) -> float:
         """
-        Estimate cost for embedding a text.
+        Estimate cost for embedding a single text.
+
+        For batch embedding cost estimation, use PolarsBatchEmbedder.
 
         Args:
             text: Text to embed
