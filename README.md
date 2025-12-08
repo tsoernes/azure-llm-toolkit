@@ -8,6 +8,7 @@ A comprehensive Python library for working with Azure OpenAI APIs, featuring rat
 - **Cost Tracking & Estimation**: Track and estimate costs for all API calls with configurable pricing
 - **Retry Logic**: Exponential backoff retry logic for handling transient failures
 - **Batch Processing**: Efficient batch embedding with automatic splitting
+- **High-Performance Batch Embedder**: Advanced Polars-based batch embedder for processing large datasets with intelligent batching and weighted averaging
 - **Chat Completions**: Support for chat completions with reasoning models (GPT-4o, o1, etc.)
 - **Query Rewriting**: LLM-powered query rewriting for better retrieval
 - **Metadata Extraction**: Extract structured metadata from filenames and content
@@ -18,6 +19,12 @@ A comprehensive Python library for working with Azure OpenAI APIs, featuring rat
 
 ```bash
 pip install azure-llm-toolkit
+```
+
+For high-performance batch embedding with Polars:
+
+```bash
+pip install azure-llm-toolkit[polars]
 ```
 
 Or install from source:
@@ -208,6 +215,52 @@ result = await client.embed_texts(
 print(f"Embedded {len(result.embeddings)} documents")
 print(f"Total tokens: {result.usage.total_tokens}")
 ```
+
+### High-Performance Batch Embedding with Polars
+
+For large-scale embedding tasks, use the Polars-based batch embedder:
+
+```python
+import polars as pl
+from azure_llm_toolkit import AzureConfig, PolarsBatchEmbedder
+
+# Create DataFrame with texts
+df = pl.DataFrame({
+    "id": range(10000),
+    "text": [f"Document {i} content..." for i in range(10000)]
+})
+
+# Configure embedder
+config = AzureConfig()
+embedder = PolarsBatchEmbedder(
+    config=config,
+    max_tokens_per_minute=450_000,  # Adjust based on your quota
+    max_lists_per_query=1000,  # Texts per API call
+)
+
+# Embed entire DataFrame
+result_df = await embedder.embed_dataframe(df, text_column="text")
+
+# Result includes:
+# - Original columns
+# - text.tokens: Token IDs
+# - text.token_count: Token counts
+# - text.embedding: Embedding vectors
+
+print(f"Embedded {len(result_df)} documents")
+print(f"Total tokens: {result_df['text.token_count'].sum():,}")
+
+# Save to Parquet for later use
+result_df.write_parquet("embeddings.parquet")
+```
+
+Features of the Polars batch embedder:
+- **Intelligent batching**: Automatically creates batches based on token and list limits
+- **Weighted averaging**: Handles texts exceeding token limits by splitting and averaging
+- **Incremental processing**: Only embed new documents (skip existing embeddings)
+- **Progress tracking**: Built-in tqdm progress bars
+- **High performance**: Uses multiprocessing for tokenization and Polars for data operations
+- **Disk caching**: Optional saving of intermediate results
 
 ### Query Rewriting
 

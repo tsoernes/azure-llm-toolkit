@@ -60,6 +60,16 @@ from .types import (
     UsageInfo,
 )
 
+# Optional batch embedder (requires polars)
+try:
+    from .batch_embedder import PolarsBatchEmbedder, PolarsNotAvailableError
+
+    _BATCH_EMBEDDER_AVAILABLE = True
+except ImportError:
+    _BATCH_EMBEDDER_AVAILABLE = False
+    PolarsBatchEmbedder = None  # type: ignore
+    PolarsNotAvailableError = None  # type: ignore
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -82,6 +92,9 @@ __all__ = [
     "ChatCompletionResult",
     "EmbeddingResult",
     "QueryRewriteResult",
+    # Batch embedder (optional)
+    "PolarsBatchEmbedder",
+    "PolarsNotAvailableError",
     # Version
     "__version__",
 ]

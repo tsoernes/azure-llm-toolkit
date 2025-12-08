@@ -32,12 +32,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+polars = [
+    "polars>=0.19.0",
+    "tqdm>=4.65.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
     "mypy>=1.8.0",
     "basedpyright>=1.31.4",
+    "polars>=0.19.0",
+    "tqdm>=4.65.0",
 ]
 
 [project.urls]
