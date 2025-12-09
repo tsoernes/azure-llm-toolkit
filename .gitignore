@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Environment and local caches
+.env
+.llm_cache/
+live_costs.jsonl

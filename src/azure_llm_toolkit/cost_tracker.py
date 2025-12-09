@@ -86,13 +86,15 @@ class CostEstimator:
         }
 
         # Embedding models (per 1M tokens)
+        # text-embedding-3-small: 0.000226 kr per 1K tokens -> 0.226 kr per 1M
         self._pricing["text-embedding-3-small"] = {
-            "input": 0.17,
+            "input": 0.226,
             "output": 0.0,
             "cached_input": 0.0,
         }
+        # text-embedding-3-large: 0.001466 kr per 1K tokens -> 1.466 kr per 1M
         self._pricing["text-embedding-3-large"] = {
-            "input": 1.03,
+            "input": 1.466,
             "output": 0.0,
             "cached_input": 0.0,
         }
@@ -310,7 +312,7 @@ class InMemoryCostTracker:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record a cost entry."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         import json
         from pathlib import Path
 
@@ -323,7 +325,7 @@ class InMemoryCostTracker:
             "currency": currency,
             "amount": amount,
             "metadata": metadata or {},
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self._entries.append(entry)
 

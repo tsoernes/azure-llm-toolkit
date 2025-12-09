@@ -1,6 +1,6 @@
 [project]
 name = "azure-llm-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Azure OpenAI client wrapper with rate limiting, cost tracking, and retry logic"
 readme = "README.md"
 authors = [

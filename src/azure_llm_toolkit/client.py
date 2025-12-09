@@ -155,6 +155,16 @@ class AzureLLMClient:
             Embedding vector
         """
         model = model or self.config.embedding_deployment
+        logger.debug(
+            "embed_text called",
+            extra={
+                "model": model,
+                "text_length": len(text),
+                "enable_rate_limiting": self.enable_rate_limiting,
+                "has_rate_limiter_pool": bool(self.rate_limiter_pool),
+                "enable_cache": self.enable_cache,
+            },
+        )
 
         # Metrics tracker (optional)
         metrics_tracker = None
@@ -178,10 +188,24 @@ class AzureLLMClient:
         # Rate limiting
         if self.enable_rate_limiting and self.rate_limiter_pool:
             tokens = self.config.count_tokens(text)
+            logger.debug(
+                "embed_text acquiring rate limiter",
+                extra={
+                    "model": model,
+                    "estimated_tokens": tokens,
+                },
+            )
             limiter = await self.rate_limiter_pool.get_limiter(model)
             await limiter.acquire(tokens=tokens)
 
         response = await self.client.embeddings.create(model=model, input=[text])
+        logger.debug(
+            "embed_text received response",
+            extra={
+                "model": model,
+                "usage": getattr(response, "usage", None),
+            },
+        )
 
         embedding = response.data[0].embedding
 

@@ -20,13 +20,19 @@ class UsageInfo:
         """Create UsageInfo from OpenAI API response usage object."""
         if usage is None:
             return cls()
+
+        # Handle prompt_tokens_details which may be a structured object
+        cached = 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details is not None:
+            # Newer OpenAI clients return a PromptTokensDetails object
+            cached = getattr(details, "cached_tokens", 0) or 0
+
         return cls(
             prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
             completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
             total_tokens=getattr(usage, "total_tokens", 0) or 0,
-            cached_prompt_tokens=getattr(usage, "prompt_tokens_details", {}).get("cached_tokens", 0)
-            if hasattr(usage, "prompt_tokens_details")
-            else 0,
+            cached_prompt_tokens=cached,
         )
 
     def to_dict(self) -> dict[str, int]:
