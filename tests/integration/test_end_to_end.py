@@ -4,13 +4,13 @@ End-to-end integration tests combining core components of azure-llm-toolkit.
 
 These tests are designed to validate that major building blocks work together:
 
-- AzureLLMClient (mocked) for chat and embeddings
+- AzureLLMClient (monkeypatched) for chat and embeddings
 - ConversationManager for multi-turn interactions and summarization
 - ChatBatchRunner and EmbeddingBatchRunner for logical batching
 - StructuredOutputManager for validated structured outputs
 - HealthChecker for health/readiness checks
 
-All tests use lightweight dummy/mocked clients to avoid real network calls.
+All tests monkeypatch AzureLLMClient methods to avoid real network calls.
 """
 
 from __future__ import annotations
@@ -37,11 +37,6 @@ from azure_llm_toolkit import (
 )
 
 
-# =============================================================================
-# Dummy client for integration tests
-# =============================================================================
-
-
 class DummyUsage:
     """Simple dummy usage mimicking OpenAI usage."""
 
@@ -60,104 +55,6 @@ class DummyChatResponse:
         self.id = "dummy"
         self.object = "chat.completion"
         self.created = 0
-
-
-class DummyAzureLLMClient(AzureLLMClient):
-    """
-    Lightweight dummy client used for integration tests.
-
-    It subclasses AzureLLMClient to satisfy type expectations, but overrides
-    async methods to avoid real network calls.
-    """
-
-    def __init__(self) -> None:
-        # Create a minimal config; values are mostly unused in tests.
-        config = AzureConfig()
-        # Let the base class initialize its internal wiring.
-        super().__init__(config=config, enable_rate_limiting=False, enable_cache=False)
-        self._chat_counter = 0
-        self._embed_counter = 0
-
-    async def embed_text(
-        self,
-        text: str,
-        model: str | None = None,
-        track_cost: bool = True,
-        use_cache: bool = True,
-    ) -> List[float]:
-        """Return a deterministic embedding for a single text."""
-        self._embed_counter += 1
-        # Simple deterministic embedding: [len(text), call_index]
-        return [float(len(text)), float(self._embed_counter)]
-
-    async def embed_texts(
-        self,
-        texts: list[str],
-        model: str | None = None,
-        batch_size: int = 100,
-        track_cost: bool = True,
-    ):
-        """Return deterministic embeddings for multiple texts."""
-        self._embed_counter += 1
-        embeddings: list[list[float]] = []
-        for idx, text in enumerate(texts):
-            embeddings.append([float(len(text)), float(idx)])
-        usage = DummyUsage(prompt_tokens=len(texts), completion_tokens=0)
-        return type(
-            "DummyEmbeddingResult",
-            (),
-            {
-                "embeddings": embeddings,
-                "usage": usage,
-                "model": model or "test-embed-model",
-            },
-        )()
-
-    async def chat_completion(
-        self,
-        messages: list[dict[str, str]],
-        system_prompt: str | None = None,
-        model: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        reasoning_effort: str | None = None,
-        response_format: Any | None = None,
-        track_cost: bool = True,
-        use_cache: bool = True,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: Any | None = None,
-    ):
-        """
-        Dummy chat_completion that:
-        - Echoes the last user message with a prefix
-        - If the prompt is clearly a "summary" request, returns a shortened response
-        - If response_format is JSON, returns a simple JSON object
-        """
-        self._chat_counter += 1
-        user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
-        last_user = user_contents[-1] if user_contents else ""
-
-        # Simple heuristic: if "Summarize the conversation" in content, return a summary-like string
-        if "Summarize the conversation" in last_user or "running summary" in last_user:
-            content = "This is a concise summary focusing on recent turns."
-        elif response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
-            # Return JSON for structured output tests
-            content = '{"name": "Alice", "age": 30, "occupation": "Engineer"}'
-        else:
-            content = f"dummy-response-{self._chat_counter}: {last_user[:80]}"
-
-        usage = DummyUsage(prompt_tokens=10, completion_tokens=5)
-        return type(
-            "DummyChatResult",
-            (),
-            {
-                "content": content,
-                "usage": usage,
-                "model": model or "test-model",
-                "finish_reason": "stop",
-                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
-            },
-        )()
 
 
 # =============================================================================
@@ -182,12 +79,48 @@ async def test_conversation_manager_end_to_end() -> None:
     ConversationManager integrates with a client, maintains history, and summarizes.
 
     Flow:
-    - Create DummyAzureLLMClient and ConversationManager
+    - Create AzureLLMClient and ConversationManager
     - Send multiple user messages
     - Force summarization by lowering thresholds
     - Verify that a summary is created and history is trimmed
     """
-    client = DummyAzureLLMClient()
+    config_obj = AzureConfig()
+    client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
+
+    async def fake_chat_completion(
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        last_user = user_contents[-1] if user_contents else ""
+        if "Summarize the conversation" in last_user or "running summary" in last_user:
+            content = "This is a concise summary focusing on recent turns."
+        else:
+            content = f"dummy-response: {last_user[:80]}"
+        usage = DummyUsage(prompt_tokens=10, completion_tokens=5)
+        return type(
+            "DummyChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": model or "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
+            },
+        )()
+
+    client.chat_completion = fake_chat_completion  # type: ignore[assignment]
+
     config = ConversationConfig(
         max_history_messages=6,
         max_history_tokens=200,
@@ -227,7 +160,65 @@ async def test_batch_runner_and_embeddings_end_to_end() -> None:
     - Use the results as text for embedding batch
     - Verify order, IDs, and basic semantics
     """
-    client = DummyAzureLLMClient()
+    config_obj = AzureConfig()
+    client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
+
+    async def fake_chat_completion(
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        last_user = user_contents[-1] if user_contents else ""
+        if "Summarize the conversation" in last_user or "running summary" in last_user:
+            content = "This is a concise summary focusing on recent turns."
+        elif response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
+            content = '{"name": "Alice", "age": 30, "occupation": "Engineer"}'
+        else:
+            content = f"dummy-response: {last_user[:80]}"
+        usage = DummyUsage(prompt_tokens=10, completion_tokens=5)
+        return type(
+            "DummyChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": model or "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
+            },
+        )()
+
+    async def fake_embed_texts(
+        texts: list[str],
+        model: str | None = None,
+        batch_size: int = 100,
+        track_cost: bool = True,
+    ):
+        embeddings: list[list[float]] = []
+        for idx, text in enumerate(texts):
+            embeddings.append([float(len(text)), float(idx)])
+        usage = DummyUsage(prompt_tokens=len(texts), completion_tokens=0)
+        return type(
+            "DummyEmbeddingResult",
+            (),
+            {
+                "embeddings": embeddings,
+                "usage": usage,
+                "model": model or "test-embed-model",
+            },
+        )()
+
+    client.chat_completion = fake_chat_completion  # type: ignore[assignment]
+    client.embed_texts = fake_embed_texts  # type: ignore[assignment]
 
     # --- Chat batch ---
     chat_items = [
@@ -270,14 +261,73 @@ async def test_batch_runner_and_embeddings_end_to_end() -> None:
 @pytest.mark.asyncio
 async def test_structured_output_manager_end_to_end() -> None:
     """
-    StructuredOutputManager works end-to-end with DummyAzureLLMClient.
+    StructuredOutputManager works end-to-end with AzureLLMClient (monkeypatched).
 
     Flow:
     - Use StructuredOutputManager with Person model
     - Extract structured data from text
     - Then run extract_batch on multiple texts
     """
-    client = DummyAzureLLMClient()
+    config_obj = AzureConfig()
+    client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
+
+    async def fake_chat_completion(
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        last_user = user_contents[-1] if user_contents else ""
+
+        # When JSON structured output is requested, return valid JSON
+        if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
+            content = '{"name": "Alice", "age": 30, "occupation": "Engineer"}'
+        else:
+            content = f"dummy-response: {last_user[:80]}"
+
+        usage = DummyUsage(prompt_tokens=5, completion_tokens=7)
+        return type(
+            "DummyChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": model or "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
+            },
+        )()
+
+    async def fake_embed_texts(
+        texts: list[str],
+        model: str | None = None,
+        batch_size: int = 100,
+        track_cost: bool = True,
+    ):
+        embeddings: list[list[float]] = []
+        for idx, text in enumerate(texts):
+            embeddings.append([float(len(text)), float(idx)])
+        usage = DummyUsage(prompt_tokens=len(texts), completion_tokens=0)
+        return type(
+            "DummyEmbeddingResult",
+            (),
+            {
+                "embeddings": embeddings,
+                "usage": usage,
+                "model": model or "test-embed-model",
+            },
+        )()
+
+    client.chat_completion = fake_chat_completion  # type: ignore[assignment]
+    client.embed_texts = fake_embed_texts  # type: ignore[assignment]
     manager = StructuredOutputManager(client)
 
     text = "Alice is a 30-year-old engineer."
@@ -290,7 +340,7 @@ async def test_structured_output_manager_end_to_end() -> None:
         "Alice is 30 and works as an engineer.",
         "Bob is 40 and works as a teacher.",
     ]
-    # Our Dummy client always returns the same JSON for structured output,
+    # Our fake client always returns the same JSON for structured output,
     # but this still exercises the flow.
     people = await manager.extract_batch(texts, Person, use_cache=False)
     assert len(people) == 2
@@ -303,29 +353,61 @@ async def test_structured_output_validation_failure_propagates() -> None:
     StructuredOutputManager surfaces validation exhaustion properly.
 
     Flow:
-    - Use a Dummy client that returns invalid JSON for structured extraction
+    - Use a client that returns invalid JSON for structured extraction
     - Expect ValidationRetryExhaustedError
     """
 
-    class BadClient(DummyAzureLLMClient):
-        async def chat_completion(self, *args: Any, **kwargs: Any):
-            # Always return invalid JSON
-            content = "not-json"
-            usage = DummyUsage(prompt_tokens=5, completion_tokens=5)
-            return type(
-                "BadChatResult",
-                (),
-                {
-                    "content": content,
-                    "usage": usage,
-                    "model": "test-model",
-                    "finish_reason": "stop",
-                    "raw_response": DummyChatResponse(content=content, model="test-model"),
-                },
-            )()
+    config_obj = AzureConfig()
+    real_client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
 
-    client = BadClient()
-    manager = StructuredOutputManager(client)
+    async def bad_chat_completion(
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        # Always return invalid JSON, regardless of response_format
+        content = "not-json"
+        usage = DummyUsage(prompt_tokens=5, completion_tokens=5)
+        return type(
+            "BadChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": model or "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
+            },
+        )()
+
+    config_obj = AzureConfig()
+    real_client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
+
+    async def bad_chat_completion(*args: Any, **kwargs: Any):
+        content = "not-json"
+        usage = DummyUsage(prompt_tokens=5, completion_tokens=5)
+        return type(
+            "BadChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model="test-model"),
+            },
+        )()
+
+    real_client.chat_completion = bad_chat_completion  # type: ignore[assignment]
+    manager = StructuredOutputManager(real_client)
     text = "This will fail."
 
     with pytest.raises(ValidationRetryExhaustedError):
@@ -341,7 +423,38 @@ async def test_health_checker_end_to_end() -> None:
     - Create DummyAzureLLMClient and HealthChecker
     - Run liveness, readiness, and full health checks
     """
-    client = DummyAzureLLMClient()
+    config_obj = AzureConfig()
+    client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
+
+    async def fake_chat_completion(
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        # Always return JSON for structured output
+        content = '{"name": "Alice", "age": 30, "occupation": "Engineer"}'
+        usage = DummyUsage(prompt_tokens=5, completion_tokens=5)
+        return type(
+            "DummyChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": model or "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
+            },
+        )()
+
+    client.chat_completion = fake_chat_completion  # type: ignore[assignment]
     checker = HealthChecker(client=client, version="test-version")
 
     is_alive = await checker.check_liveness()
@@ -370,7 +483,66 @@ async def test_full_flow_conversation_batch_structured_health() -> None:
     - Use StructuredOutputManager to parse one result
     - Run HealthChecker to validate overall health
     """
-    client = DummyAzureLLMClient()
+    config_obj = AzureConfig()
+    client = AzureLLMClient(config=config_obj, enable_rate_limiting=False, enable_cache=False)
+
+    async def fake_chat_completion(
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        response_format: Any | None = None,
+        track_cost: bool = True,
+        use_cache: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
+    ):
+        user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        last_user = user_contents[-1] if user_contents else ""
+
+        # When JSON structured output is requested, return valid JSON
+        if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
+            content = '{"name": "Alice", "age": 30, "occupation": "Engineer"}'
+        else:
+            content = f"dummy-response: {last_user[:80]}"
+
+        usage = DummyUsage(prompt_tokens=5, completion_tokens=5)
+        return type(
+            "DummyChatResult",
+            (),
+            {
+                "content": content,
+                "usage": usage,
+                "model": model or "test-model",
+                "finish_reason": "stop",
+                "raw_response": DummyChatResponse(content=content, model=model or "test-model"),
+            },
+        )()
+
+    async def fake_embed_texts(
+        texts: list[str],
+        model: str | None = None,
+        batch_size: int = 100,
+        track_cost: bool = True,
+    ):
+        embeddings: list[list[float]] = []
+        for idx, text in enumerate(texts):
+            embeddings.append([float(len(text)), float(idx)])
+        usage = DummyUsage(prompt_tokens=len(texts), completion_tokens=0)
+        return type(
+            "DummyEmbeddingResult",
+            (),
+            {
+                "embeddings": embeddings,
+                "usage": usage,
+                "model": model or "test-embed-model",
+            },
+        )()
+
+    client.chat_completion = fake_chat_completion  # type: ignore[assignment]
+    client.embed_texts = fake_embed_texts  # type: ignore[assignment]
 
     # Conversation
     conv_config = ConversationConfig(

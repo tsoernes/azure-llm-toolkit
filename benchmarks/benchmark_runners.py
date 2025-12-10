@@ -128,87 +128,6 @@ class DummyChatResponse:
         self.created = 0
 
 
-class DummyAzureLLMClient(AzureLLMClient):
-    """
-    Lightweight dummy client for benchmarks in 'dummy' mode.
-
-    Subclasses AzureLLMClient to satisfy type expectations but overrides
-    network-bound methods to avoid real Azure calls.
-    """
-
-    def __init__(self) -> None:
-        config = AzureConfig()
-        super().__init__(config=config, enable_rate_limiting=False, enable_cache=False)
-        self._chat_counter = 0
-        self._embed_counter = 0
-
-    async def chat_completion(
-        self,
-        messages: list[dict[str, str]],
-        system_prompt: str | None = None,
-        model: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        reasoning_effort: str | None = None,
-        response_format: Any | None = None,
-        track_cost: bool = True,
-        use_cache: bool = True,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: Any | None = None,
-    ):
-        """Return a deterministic chat response without network calls."""
-        self._chat_counter += 1
-        user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
-        last_user = user_contents[-1] if user_contents else ""
-        content = f"[dummy-{self._chat_counter}] {last_user[:80]}"
-        usage = DummyUsage(prompt_tokens=10, completion_tokens=5)
-        return type(
-            "DummyChatResult",
-            (),
-            {
-                "content": content,
-                "usage": usage,
-                "model": model or "dummy-model",
-                "finish_reason": "stop",
-                "raw_response": DummyChatResponse(content=content, model=model or "dummy-model"),
-            },
-        )()
-
-    async def embed_text(
-        self,
-        text: str,
-        model: str | None = None,
-        track_cost: bool = True,
-        use_cache: bool = True,
-    ) -> list[float]:
-        """Return a deterministic embedding for a single text."""
-        self._embed_counter += 1
-        return [float(len(text)), float(self._embed_counter), 0.0]
-
-    async def embed_texts(
-        self,
-        texts: list[str],
-        model: str | None = None,
-        batch_size: int = 100,
-        track_cost: bool = True,
-    ):
-        """Return deterministic embeddings for multiple texts."""
-        self._embed_counter += 1
-        embeddings: list[list[float]] = []
-        for idx, text in enumerate(texts):
-            embeddings.append([float(len(text)), float(idx), float(self._embed_counter)])
-        usage = DummyUsage(prompt_tokens=len(texts), completion_tokens=0)
-        return type(
-            "DummyEmbeddingResult",
-            (),
-            {
-                "embeddings": embeddings,
-                "usage": usage,
-                "model": model or "dummy-embed-model",
-            },
-        )()
-
-
 # =============================================================================
 # Helper functions
 # =============================================================================
@@ -436,13 +355,73 @@ async def run_benchmarks(
     if mode not in {"real", "dummy"}:
         raise ValueError("mode must be 'real' or 'dummy'")
 
+    config = AzureConfig()
+    client = AzureLLMClient(config=config)
     if mode == "real":
-        config = AzureConfig()
-        client = AzureLLMClient(config=config)
         print("Running benchmarks in REAL mode (Azure environment).")
     else:
-        client = DummyAzureLLMClient()
         print("Running benchmarks in DUMMY mode (no network calls).")
+
+        async def fake_chat_completion(
+            messages: list[dict[str, str]],
+            system_prompt: str | None = None,
+            model: str | None = None,
+            temperature: float | None = None,
+            max_tokens: int | None = None,
+            reasoning_effort: str | None = None,
+            response_format: Any | None = None,
+            track_cost: bool = True,
+            use_cache: bool = True,
+            tools: list[dict[str, Any]] | None = None,
+            tool_choice: Any | None = None,
+        ):
+            user_contents = [m.get("content", "") for m in messages if m.get("role") == "user"]
+            last_user = user_contents[-1] if user_contents else ""
+            content = f"[dummy] {last_user[:80]}"
+            usage = DummyUsage(prompt_tokens=10, completion_tokens=5)
+            return type(
+                "DummyChatResult",
+                (),
+                {
+                    "content": content,
+                    "usage": usage,
+                    "model": model or "dummy-model",
+                    "finish_reason": "stop",
+                    "raw_response": DummyChatResponse(content=content, model=model or "dummy-model"),
+                },
+            )()
+
+        async def fake_embed_text(
+            text: str,
+            model: str | None = None,
+            track_cost: bool = True,
+            use_cache: bool = True,
+        ) -> list[float]:
+            return [float(len(text)), 0.0, 0.0]
+
+        async def fake_embed_texts(
+            texts: list[str],
+            model: str | None = None,
+            batch_size: int = 100,
+            track_cost: bool = True,
+        ):
+            embeddings: list[list[float]] = []
+            for idx, text in enumerate(texts):
+                embeddings.append([float(len(text)), float(idx), 0.0])
+            usage = DummyUsage(prompt_tokens=len(texts), completion_tokens=0)
+            return type(
+                "DummyEmbeddingResult",
+                (),
+                {
+                    "embeddings": embeddings,
+                    "usage": usage,
+                    "model": model or "dummy-embed-model",
+                },
+            )()
+
+        client.chat_completion = fake_chat_completion  # type: ignore[assignment]
+        client.embed_text = fake_embed_text  # type: ignore[assignment]
+        client.embed_texts = fake_embed_texts  # type: ignore[assignment]
 
     # Chat benchmark
     if "chat" in benches:

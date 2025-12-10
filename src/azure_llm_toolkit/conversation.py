@@ -119,11 +119,7 @@ class ConversationManager:
 
     def _count_tokens(self, text: str) -> int:
         """Count tokens in text."""
-        try:
-            return self.client.config.count_tokens(text, model=self.config.model)
-        except Exception:
-            # Fallback: rough estimate
-            return len(text.split()) * 2
+        return self.client.config.count_tokens(text)
 
     def _should_summarize(self) -> bool:
         """Check if conversation should be summarized."""
