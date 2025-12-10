@@ -22,7 +22,7 @@ Why logprob reranking?
 
 Defaults
 --------
-- Model: Uses the chat deployment from AzureConfig
+- Model: "gpt-4o-east-US"
 - Bins: ["0","1","2","3","4","5","6","7","8","9","10"] mapping to 0.0..1.0
 - top_logprobs: 5
 - logprob_floor: -16.0 (used when a bin token is not present in top_logprobs)
@@ -106,7 +106,7 @@ class RerankerConfig:
         timeout: Request timeout in seconds
     """
 
-    model: str | None = None
+    model: str = "gpt-4o-east-US"
     bins: list[str] | None = None
     top_logprobs: int = 5
     logprob_floor: float = -16.0
@@ -119,6 +119,8 @@ class RerankerConfig:
         if self.bins is None or len(self.bins) == 0:
             # Default to 11 bins mapping evenly to [0.0..1.0]
             self.bins = [str(i) for i in range(11)]
+        if self.model is None:
+            self.model = "gpt-4o-east-US"
 
 
 @dataclass
@@ -286,18 +288,12 @@ class LogprobReranker:
             # AzureLLMClient wrapper
             self._openai_client = client.client
             self._use_toolkit_client = True
-            # Use chat deployment from config if model not specified
-            if self.config.model is None and hasattr(client, "config"):
-                self.config.model = client.config.chat_deployment
         elif isinstance(client, AsyncAzureOpenAI):
             # Direct AsyncAzureOpenAI client
             self._openai_client = client
             self._use_toolkit_client = False
         else:
             raise TypeError(f"client must be AzureLLMClient or AsyncAzureOpenAI, got {type(client)}")
-
-        if self.config.model is None:
-            raise ValueError("model/deployment must be specified in config or available from client")
 
     async def score(
         self,
@@ -455,7 +451,7 @@ class LogprobReranker:
 
 def create_reranker(
     client: Any,
-    model: str | None = None,
+    model: str = "gpt-4o-east-US",
     bins: list[str] | None = None,
     **kwargs: Any,
 ) -> LogprobReranker:
@@ -464,7 +460,7 @@ def create_reranker(
 
     Args:
         client: AzureLLMClient or AsyncAzureOpenAI instance
-        model: Model/deployment name (optional)
+        model: Model/deployment name (default: "gpt-4o-east-US")
         bins: Custom bin tokens (optional)
         **kwargs: Additional RerankerConfig parameters
 

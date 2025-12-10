@@ -22,7 +22,7 @@ def demonstrate_config():
     # Default configuration
     config_default = RerankerConfig()
     print("\n1. Default Configuration:")
-    print(f"   Model: {config_default.model}")
+    print(f"   Model: {config_default.model} (default)")
     print(f"   Bins: {config_default.bins}")
     print(f"   Temperature: {config_default.temperature}")
     print(f"   Top logprobs: {config_default.top_logprobs}")
@@ -100,6 +100,8 @@ def demonstrate_api_patterns():
 
     config = AzureConfig()
     client = AzureLLMClient(config=config)
+
+    # Uses gpt-4o-east-US by default
     reranker = LogprobReranker(client=client)
 
     # Rerank documents

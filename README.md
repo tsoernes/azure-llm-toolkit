@@ -102,7 +102,7 @@ from azure_llm_toolkit.reranker import LogprobReranker
 config = AzureConfig()
 client = AzureLLMClient(config=config)
 
-# Create reranker (uses chat deployment from config)
+# Create reranker (defaults to gpt-4o-east-US)
 reranker = LogprobReranker(client=client)
 
 query = "What is machine learning?"

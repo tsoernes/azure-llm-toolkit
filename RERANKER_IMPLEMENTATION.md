@@ -14,7 +14,7 @@ The logprob-based reranker provides zero-shot semantic relevance scoring for doc
 
 #### 1. **RerankerConfig** (`reranker.py`)
 Configuration dataclass for reranker parameters:
-- `model`: Model/deployment name (defaults to client's chat deployment)
+- `model`: Model/deployment name (default: "gpt-4o-east-US")
 - `bins`: List of relevance bin tokens (default: ["0".."10"])
 - `top_logprobs`: Number of logprob candidates to request (default: 5)
 - `logprob_floor`: Floor value for missing bins (default: -16.0)
@@ -56,6 +56,7 @@ The reranker works by:
 The reranker integrates seamlessly with the toolkit's infrastructure:
 
 - **Client Compatibility**: Works with both `AzureLLMClient` and raw `AsyncAzureOpenAI`
+- **Default Model**: Uses "gpt-4o-east-US" by default, can be overridden in config
 - **Cost Tracking**: Automatically integrates with toolkit's cost tracking when using `AzureLLMClient`
 - **Rate Limiting**: Respects rate limits through the toolkit's rate limiter
 - **Type Safety**: Full type hints and dataclasses
@@ -235,11 +236,12 @@ Key differences from the original implementation:
 - Adapted to azure-llm-toolkit's client structure
 - Added `RerankResult` dataclass for better type safety
 - Simplified configuration with sensible defaults
+- Changed default model to "gpt-4o-east-US" (was auto-detected from client)
 
 ### Integration
 - Works with `AzureLLMClient` for full toolkit integration
 - Also supports raw `AsyncAzureOpenAI` for flexibility
-- Automatic model/deployment detection from client config
+- Uses "gpt-4o-east-US" by default, customizable via config
 
 ### Error Handling
 - Enhanced error messages and logging

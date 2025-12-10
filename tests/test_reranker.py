@@ -114,6 +114,7 @@ def test_reranker_config_defaults():
     """Test default configuration values."""
     config = RerankerConfig()
 
+    assert config.model == "gpt-4o-east-US"
     assert config.bins == [str(i) for i in range(11)]
     assert config.top_logprobs == 5
     assert config.logprob_floor == -16.0
@@ -161,7 +162,7 @@ def test_reranker_init_with_azure_client():
     reranker = LogprobReranker(client=mock_llm_client)
 
     assert reranker._openai_client == mock_azure_client
-    assert reranker.config.model == "gpt-4o"
+    assert reranker.config.model == "gpt-4o-east-US"
 
 
 def test_reranker_init_with_openai_client():
@@ -181,12 +182,12 @@ def test_reranker_init_invalid_client():
         LogprobReranker(client="not a client")
 
 
-def test_reranker_init_no_model():
-    """Test initialization without model specified."""
+def test_reranker_init_with_default_model():
+    """Test initialization uses default model."""
     mock_client = AsyncMock(spec=AsyncAzureOpenAI)
 
-    with pytest.raises(ValueError, match="model/deployment must be specified"):
-        LogprobReranker(client=mock_client)
+    reranker = LogprobReranker(client=mock_client)
+    assert reranker.config.model == "gpt-4o-east-US"
 
 
 # -----------------------------
@@ -614,7 +615,7 @@ async def test_integration_with_azure_llm_client():
 
     # Verify client extraction worked
     assert reranker._openai_client == mock_azure_client
-    assert reranker.config.model == "gpt-4o"
+    assert reranker.config.model == "gpt-4o-east-US"
 
 
 def test_module_exports():
