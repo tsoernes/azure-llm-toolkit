@@ -85,6 +85,18 @@ from .metrics import (
     OPENTELEMETRY_AVAILABLE,
 )
 from .rate_limiter import RateLimiter, RateLimiterPool, get_rate_limiter_pool
+from .batch import (
+    BatchStatus,
+    BatchError,
+    BaseBatchItem,
+    BaseBatchResult,
+    ChatBatchItem,
+    ChatBatchResult,
+    ChatBatchRunner,
+    EmbeddingBatchItem,
+    EmbeddingBatchResult,
+    EmbeddingBatchRunner,
+)
 from .streaming import (
     StreamSink,
     StreamChunk,
@@ -263,6 +275,17 @@ __all__ = [
     "QueryRewriteResult",
     # Batch embedder
     "PolarsBatchEmbedder",
+    # Batch runners
+    "BatchStatus",
+    "BatchError",
+    "BaseBatchItem",
+    "BaseBatchResult",
+    "ChatBatchItem",
+    "ChatBatchResult",
+    "ChatBatchRunner",
+    "EmbeddingBatchItem",
+    "EmbeddingBatchResult",
+    "EmbeddingBatchRunner",
     # Version
     "__version__",
 ]

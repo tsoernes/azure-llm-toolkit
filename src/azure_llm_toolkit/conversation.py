@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Awaitable
 
+import tiktoken
+
 from .client import AzureLLMClient
 from .types import ChatCompletionResult
 
@@ -118,12 +120,23 @@ class ConversationManager:
         return str(uuid.uuid4())
 
     def _count_tokens(self, text: str) -> int:
-        """Count tokens in text."""
+        """Count tokens in text using tiktoken when possible."""
+        # Prefer tiktoken for accurate counting
         try:
-            return self.client.config.count_tokens(text, model=self.config.model)
+            model = self.config.model or self.client.config.chat_deployment
+            try:
+                enc = tiktoken.encoding_for_model(model)
+            except KeyError:
+                # Fallback to a reasonable default encoding
+                enc = tiktoken.get_encoding("cl100k_base")
+            return len(enc.encode(text))
         except Exception:
-            # Fallback: rough estimate
-            return len(text.split()) * 2
+            # Fallback to existing config-based method
+            try:
+                return self.client.config.count_tokens(text, model=self.config.model)
+            except Exception:
+                # Final fallback: rough estimate
+                return len(text.split()) * 2
 
     def _should_summarize(self) -> bool:
         """Check if conversation should be summarized."""
@@ -143,19 +156,29 @@ class ConversationManager:
         if not self.messages:
             return ""
 
-        # Create summary prompt
+        # Create summary prompt where recent turns are more important and the summary is optimized
+        # to help continue the conversation naturally.
         history_text = "\n\n".join([f"{m.role}: {m.content}" for m in self.messages])
 
         summary_prompt = (
-            f"Summarize the following conversation concisely, preserving key information and context:\n\n{history_text}"
+            "You are maintaining a running summary of an ongoing conversation.\n\n"
+            "Task:\n"
+            "- Summarize the conversation so far.\n"
+            "- Preserve all key facts, decisions, and user preferences.\n"
+            "- Give extra weight to the most recent turns so that the summary is\n"
+            "  especially useful for continuing the conversation from where it left off.\n"
+            "- Write the summary in a way that the assistant can use it as context\n"
+            "  to seamlessly answer the next user message.\n\n"
+            "Conversation:\n"
+            f"{history_text}\n\n"
+            "Provide ONLY the summary, no extra commentary."
         )
 
         try:
             response = await self.client.chat_completion(
                 messages=[{"role": "user", "content": summary_prompt}],
-                system_prompt="You are a helpful assistant that creates concise conversation summaries.",
+                system_prompt="You maintain summaries that help continue the conversation smoothly.",
                 model=self.config.model,
-                max_tokens=500,
                 track_cost=False,
             )
 
