@@ -113,6 +113,39 @@ from .reranker import (
     RerankResult,
     create_reranker,
 )
+from .tools import (
+    ToolChoiceType,
+    ParameterProperty,
+    FunctionDefinition,
+    ToolCall,
+    ToolCallResult,
+    ToolRegistry,
+    tool,
+    get_default_registry,
+    reset_default_registry,
+)
+from .validation import (
+    StructuredOutputError,
+    ValidationRetryExhaustedError,
+    generate_json_schema,
+    create_extraction_prompt,
+    parse_json_response,
+    chat_completion_structured,
+    extract_structured_data,
+    StructuredOutputManager,
+)
+from .sync_client import AzureLLMClientSync
+from .health import (
+    HealthStatus,
+    ComponentHealth,
+    HealthCheckResult,
+    HealthChecker,
+)
+from .conversation import (
+    ConversationMessage,
+    ConversationConfig,
+    ConversationManager,
+)
 from .types import (
     ChatCompletionResult,
     CostInfo,
@@ -192,6 +225,36 @@ __all__ = [
     "RerankerConfig",
     "RerankResult",
     "create_reranker",
+    # Tools / function calling
+    "ToolChoiceType",
+    "ParameterProperty",
+    "FunctionDefinition",
+    "ToolCall",
+    "ToolCallResult",
+    "ToolRegistry",
+    "tool",
+    "get_default_registry",
+    "reset_default_registry",
+    # Structured output / validation
+    "StructuredOutputError",
+    "ValidationRetryExhaustedError",
+    "generate_json_schema",
+    "create_extraction_prompt",
+    "parse_json_response",
+    "chat_completion_structured",
+    "extract_structured_data",
+    "StructuredOutputManager",
+    # Sync client
+    "AzureLLMClientSync",
+    # Health checks
+    "HealthStatus",
+    "ComponentHealth",
+    "HealthCheckResult",
+    "HealthChecker",
+    # Conversation manager
+    "ConversationMessage",
+    "ConversationConfig",
+    "ConversationManager",
     # Types
     "UsageInfo",
     "CostInfo",
