@@ -11,6 +11,7 @@ A comprehensive Python library for working with Azure OpenAI APIs, featuring rat
 - **Batch Processing**: Efficient batch embedding with automatic splitting
 - **High-Performance Batch Embedder**: Advanced Polars-based batch embedder for processing large datasets with intelligent batching and weighted averaging
 - **Chat Completions**: Support for chat completions with reasoning models (GPT-4o, o1, etc.)
+- **Logprob-Based Reranker**: Zero-shot semantic reranking using token log probabilities for calibrated relevance scoring
 - **Query Rewriting**: LLM-powered query rewriting for better retrieval
 - **Metadata Extraction**: Extract structured metadata from filenames and content
 - **Token Counting**: Accurate token counting using tiktoken
@@ -87,6 +88,96 @@ asyncio.run(main())
 ```
 
 ## Advanced Usage
+
+### Logprob-Based Reranking
+
+The library includes a powerful logprob-based reranker that provides calibrated relevance scores without requiring fine-tuning or specialized models. It uses token log probabilities from Azure OpenAI's chat completions to score documents.
+
+#### Basic Reranking
+
+```python
+from azure_llm_toolkit import AzureLLMClient, AzureConfig
+from azure_llm_toolkit.reranker import LogprobReranker
+
+config = AzureConfig()
+client = AzureLLMClient(config=config)
+
+# Create reranker (uses chat deployment from config)
+reranker = LogprobReranker(client=client)
+
+query = "What is machine learning?"
+documents = [
+    "Machine learning is a subset of AI that enables systems to learn from data.",
+    "Python is a programming language.",
+    "Deep learning uses neural networks with multiple layers.",
+]
+
+# Rerank documents by relevance
+results = await reranker.rerank(query, documents, top_k=2)
+
+for result in results:
+    print(f"Score: {result.score:.3f} - {result.document}")
+```
+
+#### Custom Configuration
+
+```python
+from azure_llm_toolkit.reranker import RerankerConfig, create_reranker
+
+# Custom configuration with 5-level relevance scale
+reranker = create_reranker(
+    client=client,
+    model="gpt-4o",
+    bins=["0", "1", "2", "3", "4"],  # 5-level scale instead of default 11
+    temperature=0.1,  # Lower temperature for more deterministic scores
+    top_logprobs=3,
+)
+
+results = await reranker.rerank(query, documents)
+```
+
+#### Integration with RAG Pipelines
+
+```python
+# Step 1: Retrieve candidates from vector database
+retrieved_docs = vector_db.similarity_search(query, k=20)
+
+# Step 2: Rerank for better relevance
+reranker = LogprobReranker(client=client)
+reranked = await reranker.rerank(query, retrieved_docs, top_k=5)
+
+# Step 3: Use top documents as context
+context = "\n\n".join([r.document for r in reranked[:3]])
+
+# Step 4: Generate answer
+response = await client.chat_completion(
+    messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}],
+    system_prompt="Answer based on the provided context.",
+)
+```
+
+#### Bin Probability Distributions
+
+Get detailed probability distributions over relevance bins:
+
+```python
+results = await reranker.rerank(
+    query, 
+    documents, 
+    include_bin_probs=True
+)
+
+for result in results:
+    print(f"Score: {result.score:.3f}")
+    print(f"Bin probabilities: {result.bin_probabilities}")
+```
+
+**Key Features:**
+- Zero-shot: No training or fine-tuning required
+- Calibrated: Provides probabilistic relevance scores in [0.0, 1.0]
+- Model-agnostic: Works with any Azure OpenAI model that supports logprobs (gpt-4o, gpt-4-turbo, etc.)
+- Cost-effective: Uses only 1 token per document for scoring
+- Integrates seamlessly with AzureLLMClient for cost tracking and rate limiting
 
 ### Rate Limiting
 

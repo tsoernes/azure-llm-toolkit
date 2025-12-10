@@ -107,6 +107,12 @@ from .analytics import (
     CostTrend,
     Anomaly,
 )
+from .reranker import (
+    LogprobReranker,
+    RerankerConfig,
+    RerankResult,
+    create_reranker,
+)
 from .types import (
     ChatCompletionResult,
     CostInfo,
@@ -181,6 +187,11 @@ __all__ = [
     "UsageStats",
     "CostTrend",
     "Anomaly",
+    # Reranker
+    "LogprobReranker",
+    "RerankerConfig",
+    "RerankResult",
+    "create_reranker",
     # Types
     "UsageInfo",
     "CostInfo",
