@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Awaitable
 
-import tiktoken
-
 from .client import AzureLLMClient
 from .types import ChatCompletionResult
 
@@ -120,23 +118,12 @@ class ConversationManager:
         return str(uuid.uuid4())
 
     def _count_tokens(self, text: str) -> int:
-        """Count tokens in text using tiktoken when possible."""
-        # Prefer tiktoken for accurate counting
+        """Count tokens in text."""
         try:
-            model = self.config.model or self.client.config.chat_deployment
-            try:
-                enc = tiktoken.encoding_for_model(model)
-            except KeyError:
-                # Fallback to a reasonable default encoding
-                enc = tiktoken.get_encoding("cl100k_base")
-            return len(enc.encode(text))
+            return self.client.config.count_tokens(text, model=self.config.model)
         except Exception:
-            # Fallback to existing config-based method
-            try:
-                return self.client.config.count_tokens(text, model=self.config.model)
-            except Exception:
-                # Final fallback: rough estimate
-                return len(text.split()) * 2
+            # Fallback: rough estimate
+            return len(text.split()) * 2
 
     def _should_summarize(self) -> bool:
         """Check if conversation should be summarized."""
