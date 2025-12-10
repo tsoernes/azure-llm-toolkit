@@ -17,6 +17,7 @@ import pytest
 from openai import AsyncAzureOpenAI, BadRequestError, RateLimitError
 
 from azure_llm_toolkit import AzureConfig, AzureLLMClient
+from azure_llm_toolkit.rate_limiter import RateLimiter
 from azure_llm_toolkit.reranker import (
     LogprobReranker,
     RerankerConfig,
@@ -121,6 +122,8 @@ def test_reranker_config_defaults():
     assert config.temperature == 0.2
     assert config.max_tokens == 1
     assert config.timeout == 30.0
+    assert config.rpm_limit == 2700
+    assert config.tpm_limit == 450000
 
 
 def test_reranker_config_custom():
@@ -163,6 +166,9 @@ def test_reranker_init_with_azure_client():
 
     assert reranker._openai_client == mock_azure_client
     assert reranker.config.model == "gpt-4o-east-US"
+    assert reranker.rate_limiter is not None
+    assert reranker.rate_limiter.rpm_limit == 2700
+    assert reranker.rate_limiter.tpm_limit == 450000
 
 
 def test_reranker_init_with_openai_client():
@@ -188,6 +194,7 @@ def test_reranker_init_with_default_model():
 
     reranker = LogprobReranker(client=mock_client)
     assert reranker.config.model == "gpt-4o-east-US"
+    assert reranker.rate_limiter is not None
 
 
 # -----------------------------
@@ -616,6 +623,7 @@ async def test_integration_with_azure_llm_client():
     # Verify client extraction worked
     assert reranker._openai_client == mock_azure_client
     assert reranker.config.model == "gpt-4o-east-US"
+    assert reranker.rate_limiter is not None
 
 
 def test_module_exports():
@@ -630,3 +638,152 @@ def test_module_exports():
     ]
 
     assert set(__all__) == set(expected_exports)
+
+
+# -----------------------------
+# Rate Limiter Tests
+# -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_reranker_with_custom_rate_limiter():
+    """Test reranker with custom rate limiter."""
+    mock_openai_client = AsyncMock(spec=AsyncAzureOpenAI)
+    config = RerankerConfig(model="gpt-4o")
+
+    # Create custom rate limiter with lower limits
+    custom_limiter = RateLimiter(rpm_limit=100, tpm_limit=10000)
+
+    reranker = LogprobReranker(
+        client=mock_openai_client,
+        config=config,
+        rate_limiter=custom_limiter,
+    )
+
+    assert reranker.rate_limiter == custom_limiter
+    assert reranker.rate_limiter.rpm_limit == 100
+    assert reranker.rate_limiter.tpm_limit == 10000
+
+
+@pytest.mark.asyncio
+async def test_reranker_rate_limiting_in_scoring():
+    """Test that rate limiter is invoked during scoring."""
+    mock_openai_client = AsyncMock(spec=AsyncAzureOpenAI)
+
+    # Create mock response
+    mock_response = MagicMock()
+    mock_choice = MagicMock()
+    mock_logprobs = MagicMock()
+    mock_content_item = MagicMock()
+    mock_candidate = MagicMock()
+    mock_candidate.token = "7"
+    mock_candidate.logprob = -0.4
+    mock_content_item.top_logprobs = [mock_candidate]
+    mock_logprobs.content = [mock_content_item]
+    mock_choice.logprobs = mock_logprobs
+    mock_response.choices = [mock_choice]
+
+    # Add usage info
+    mock_usage = MagicMock()
+    mock_usage.total_tokens = 100
+    mock_response.usage = mock_usage
+
+    mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+    config = RerankerConfig(model="gpt-4o")
+    custom_limiter = RateLimiter(rpm_limit=1000, tpm_limit=100000)
+
+    reranker = LogprobReranker(
+        client=mock_openai_client,
+        config=config,
+        rate_limiter=custom_limiter,
+    )
+
+    # Get initial stats
+    initial_stats = custom_limiter.get_stats()
+
+    # Score a document
+    await reranker.score("test query", "test document")
+
+    # Check that rate limiter was used
+    final_stats = custom_limiter.get_stats()
+    assert final_stats["total_requests"] == initial_stats["total_requests"] + 1
+    assert final_stats["total_tokens"] > initial_stats["total_tokens"]
+
+
+@pytest.mark.asyncio
+async def test_reranker_parallel_scoring_with_rate_limiting():
+    """Test parallel scoring respects rate limits."""
+    mock_openai_client = AsyncMock(spec=AsyncAzureOpenAI)
+
+    # Create mock response
+    mock_response = MagicMock()
+    mock_choice = MagicMock()
+    mock_logprobs = MagicMock()
+    mock_content_item = MagicMock()
+    mock_candidate = MagicMock()
+    mock_candidate.token = "5"
+    mock_candidate.logprob = -0.5
+    mock_content_item.top_logprobs = [mock_candidate]
+    mock_logprobs.content = [mock_content_item]
+    mock_choice.logprobs = mock_logprobs
+    mock_response.choices = [mock_choice]
+
+    mock_usage = MagicMock()
+    mock_usage.total_tokens = 50
+    mock_response.usage = mock_usage
+
+    mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+    config = RerankerConfig(model="gpt-4o")
+    # Use high limits to ensure no blocking in test
+    custom_limiter = RateLimiter(rpm_limit=10000, tpm_limit=1000000)
+
+    reranker = LogprobReranker(
+        client=mock_openai_client,
+        config=config,
+        rate_limiter=custom_limiter,
+    )
+
+    documents = ["doc1", "doc2", "doc3", "doc4", "doc5"]
+
+    # Rerank (scores in parallel)
+    results = await reranker.rerank("query", documents)
+
+    # Check all documents were processed
+    assert len(results) == 5
+
+    # Check rate limiter tracked all requests
+    stats = custom_limiter.get_stats()
+    assert stats["total_requests"] == 5
+
+
+@pytest.mark.asyncio
+async def test_create_reranker_with_custom_limits():
+    """Test create_reranker with custom rate limits."""
+    mock_openai_client = AsyncMock(spec=AsyncAzureOpenAI)
+
+    reranker = create_reranker(
+        client=mock_openai_client,
+        model="gpt-4o",
+        rpm_limit=5000,
+        tpm_limit=600000,
+    )
+
+    assert reranker.config.rpm_limit == 5000
+    assert reranker.config.tpm_limit == 600000
+    assert reranker.rate_limiter.rpm_limit == 5000
+    assert reranker.rate_limiter.tpm_limit == 600000
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_defaults():
+    """Test that default rate limits are set correctly."""
+    mock_openai_client = AsyncMock(spec=AsyncAzureOpenAI)
+    config = RerankerConfig(model="gpt-4o")
+
+    reranker = LogprobReranker(client=mock_openai_client, config=config)
+
+    # Check defaults: 2700 RPM, 450k TPM
+    assert reranker.rate_limiter.rpm_limit == 2700
+    assert reranker.rate_limiter.tpm_limit == 450000

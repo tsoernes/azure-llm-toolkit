@@ -84,6 +84,8 @@ from openai import (
     RateLimitError,
 )
 
+from .rate_limiter import RateLimiter
+
 logger = logging.getLogger(__name__)
 
 # -----------------------------
@@ -113,6 +115,8 @@ class RerankerConfig:
     temperature: float = 0.2
     max_tokens: int = 1
     timeout: float = 30.0
+    rpm_limit: int = 2700  # Requests per minute (90% of 3000 for safety margin)
+    tpm_limit: int = 450000  # Tokens per minute
 
     def __post_init__(self) -> None:
         """Initialize default bins if not provided."""
@@ -266,12 +270,14 @@ class LogprobReranker:
     Attributes:
         client: Azure OpenAI client for API calls
         config: Reranker configuration
+        rate_limiter: Rate limiter for controlling API call rate
     """
 
     def __init__(
         self,
         client: Any,  # AzureLLMClient or AsyncAzureOpenAI
         config: RerankerConfig | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         """
         Initialize the reranker.
@@ -279,6 +285,7 @@ class LogprobReranker:
         Args:
             client: AzureLLMClient or AsyncAzureOpenAI instance
             config: Optional reranker configuration
+            rate_limiter: Optional rate limiter (creates default if not provided)
         """
         self.client = client
         self.config = config or RerankerConfig()
@@ -294,6 +301,16 @@ class LogprobReranker:
             self._use_toolkit_client = False
         else:
             raise TypeError(f"client must be AzureLLMClient or AsyncAzureOpenAI, got {type(client)}")
+
+        # Set up rate limiter
+        if rate_limiter is not None:
+            self.rate_limiter = rate_limiter
+        else:
+            # Create default rate limiter with config values
+            self.rate_limiter = RateLimiter(
+                rpm_limit=self.config.rpm_limit,
+                tpm_limit=self.config.tpm_limit,
+            )
 
     async def score(
         self,
@@ -317,6 +334,13 @@ class LogprobReranker:
         cfg = self.config
         messages = _build_messages(query, document, cfg.bins)
 
+        # Estimate tokens for rate limiting
+        # Approximate: system prompt ~40 tokens, user prompt ~30 tokens, query + doc
+        estimated_tokens = 70 + len(query.split()) + len(document.split())
+
+        # Acquire rate limit permission
+        await self.rate_limiter.acquire(tokens=estimated_tokens)
+
         try:
             resp = await self._openai_client.chat.completions.create(
                 model=cfg.model,
@@ -339,6 +363,15 @@ class LogprobReranker:
         except Exception as e:
             logger.error(f"Unexpected error in reranker.score: {e}")
             return (0.0, {}) if include_bin_probs else 0.0
+
+        # Update rate limiter with actual token usage if available
+        if hasattr(resp, "usage") and resp.usage:
+            try:
+                actual_tokens = int(getattr(resp.usage, "total_tokens", estimated_tokens))
+                self.rate_limiter.update_usage(actual_tokens, estimated_tokens)
+            except (TypeError, ValueError):
+                # If we can't get valid token count, use estimate
+                pass
 
         # Extract logprobs from response
         if not hasattr(resp, "choices") or not resp.choices:
@@ -453,6 +486,9 @@ def create_reranker(
     client: Any,
     model: str = "gpt-4o-east-US",
     bins: list[str] | None = None,
+    rate_limiter: RateLimiter | None = None,
+    rpm_limit: int = 2700,
+    tpm_limit: int = 450000,
     **kwargs: Any,
 ) -> LogprobReranker:
     """
@@ -462,6 +498,9 @@ def create_reranker(
         client: AzureLLMClient or AsyncAzureOpenAI instance
         model: Model/deployment name (default: "gpt-4o-east-US")
         bins: Custom bin tokens (optional)
+        rate_limiter: Optional rate limiter instance (creates default if not provided)
+        rpm_limit: Requests per minute limit (default: 2700)
+        tpm_limit: Tokens per minute limit (default: 450000)
         **kwargs: Additional RerankerConfig parameters
 
     Returns:
@@ -472,10 +511,12 @@ def create_reranker(
             client=client,
             model="gpt-4o",
             temperature=0.1,
+            rpm_limit=3000,
+            tpm_limit=500000,
         )
     """
-    config = RerankerConfig(model=model, bins=bins, **kwargs)
-    return LogprobReranker(client=client, config=config)
+    config = RerankerConfig(model=model, bins=bins, rpm_limit=rpm_limit, tpm_limit=tpm_limit, **kwargs)
+    return LogprobReranker(client=client, config=config, rate_limiter=rate_limiter)
 
 
 __all__ = [

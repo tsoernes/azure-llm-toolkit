@@ -93,6 +93,8 @@ asyncio.run(main())
 
 The library includes a powerful logprob-based reranker that provides calibrated relevance scores without requiring fine-tuning or specialized models. It uses token log probabilities from Azure OpenAI's chat completions to score documents.
 
+**Built-in Rate Limiting**: The reranker includes automatic rate limiting (default: 2700 RPM, 450k TPM) to prevent hitting Azure OpenAI quotas during parallel document scoring.
+
 #### Basic Reranking
 
 ```python
@@ -172,11 +174,39 @@ for result in results:
     print(f"Bin probabilities: {result.bin_probabilities}")
 ```
 
+#### Rate Limiting
+
+The reranker includes automatic rate limiting to handle parallel document scoring safely:
+
+```python
+from azure_llm_toolkit.reranker import create_reranker
+
+# Use default limits (2700 RPM, 450k TPM)
+reranker = create_reranker(client=client)
+
+# Custom rate limits
+reranker = create_reranker(
+    client=client,
+    model="gpt-4o",
+    rpm_limit=3000,  # Requests per minute
+    tpm_limit=500000,  # Tokens per minute
+)
+
+# Use shared rate limiter across multiple rerankers
+from azure_llm_toolkit import RateLimiter
+
+shared_limiter = RateLimiter(rpm_limit=5000, tpm_limit=600000)
+reranker1 = LogprobReranker(client=client, rate_limiter=shared_limiter)
+reranker2 = LogprobReranker(client=client, rate_limiter=shared_limiter)
+```
+
 **Key Features:**
 - Zero-shot: No training or fine-tuning required
 - Calibrated: Provides probabilistic relevance scores in [0.0, 1.0]
 - Model-agnostic: Works with any Azure OpenAI model that supports logprobs (gpt-4o, gpt-4-turbo, etc.)
 - Cost-effective: Uses only 1 token per document for scoring
+- Built-in rate limiting: Prevents quota exhaustion during parallel scoring (2700 RPM, 450k TPM defaults)
+- Parallel execution: Efficiently scores multiple documents concurrently with asyncio
 - Integrates seamlessly with AzureLLMClient for cost tracking and rate limiting
 
 ### Rate Limiting
