@@ -13,3 +13,4 @@ wheels/
 .env
 .llm_cache/
 live_costs.jsonl
+.ipynb_checkpoints/

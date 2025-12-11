@@ -27,6 +27,10 @@ import random
 import time
 from datetime import datetime
 
+import json
+from typing import Any
+
+import aiohttp
 from aiohttp import web
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
 
@@ -69,11 +73,24 @@ stats = {
     "avg_duration": 0.0,
     "min_duration": float("inf"),
     "max_duration": 0.0,
+    # Per-endpoint aggregates
+    "chat_requests": 0,
+    "embed_requests": 0,
+    "chat_tokens_input": 0,
+    "chat_tokens_output": 0,
+    "embed_tokens_input": 0,
+    # Prometheus-derived rates (RPM/TPM)
+    "chat_rpm": 0.0,
+    "embed_rpm": 0.0,
+    "chat_tpm_input": 0.0,
+    "chat_tpm_output": 0.0,
+    "embed_tpm_input": 0.0,
 }
 
 
 # Global client
 client = None
+_prometheus_session: aiohttp.ClientSession | None = None
 
 
 async def make_real_chat_request(prompt: str, model: str = None):
@@ -101,6 +118,10 @@ async def make_real_chat_request(prompt: str, model: str = None):
         output_tokens = usage.completion_tokens
         cached_tokens = usage.cached_prompt_tokens
 
+        # Update per-endpoint token stats
+        stats["chat_tokens_input"] += input_tokens
+        stats["chat_tokens_output"] += output_tokens
+
         # Calculate cost (simplified - you may want to use cost_estimator)
         if "gpt-4" in model_used:
             cost = input_tokens * 0.00003 + output_tokens * 0.00006
@@ -125,6 +146,7 @@ async def make_real_chat_request(prompt: str, model: str = None):
         stats["total_tokens_output"] += output_tokens
         stats["total_tokens_cached"] += cached_tokens
         stats["total_cost"] += cost
+        stats["chat_requests"] += 1
 
         # Update duration stats
         stats["avg_duration"] = (stats["avg_duration"] * (stats["successful_requests"] - 1) + duration) / stats[
@@ -167,13 +189,16 @@ async def make_real_embedding_request(text: str, deployment: str = None):
     start_time = time.time()
 
     try:
-        embedding = await client.embed_text(text=text, deployment=deployment)
+        embedding = await client.embed_text(
+            text=text,
+            model=deployment or client.config.embedding_deployment,
+        )
 
         duration = time.time() - start_time
         model_used = deployment or client.config.embedding_deployment
 
         # Estimate tokens (rough approximation)
-        input_tokens = len(text.split()) * 1.3
+        input_tokens = int(len(text.split()) * 1.3)
 
         # Calculate cost
         cost = input_tokens * 0.0001 / 1000  # Ada-002 pricing
@@ -181,14 +206,16 @@ async def make_real_embedding_request(text: str, deployment: str = None):
         # Update Prometheus metrics
         request_counter.labels(operation=operation, model=model_used, status="success").inc()
         request_duration.labels(operation=operation, model=model_used).observe(duration)
-        token_counter.labels(type="input", model=model_used).inc(int(input_tokens))
+        token_counter.labels(type="input", model=model_used).inc(input_tokens)
         cost_counter.labels(model=model_used).inc(cost)
 
         # Update stats
         stats["successful_requests"] += 1
         stats["models"][model_used] = stats["models"].get(model_used, 0) + 1
-        stats["total_tokens_input"] += int(input_tokens)
+        stats["total_tokens_input"] += input_tokens
         stats["total_cost"] += cost
+        stats["embed_requests"] += 1
+        stats["embed_tokens_input"] += input_tokens
 
         # Update duration stats
         stats["avg_duration"] = (stats["avg_duration"] * (stats["successful_requests"] - 1) + duration) / stats[
@@ -216,6 +243,91 @@ async def make_real_embedding_request(text: str, deployment: str = None):
 
     finally:
         active_requests.dec()
+
+
+async def _query_prometheus(query: str) -> list[dict[str, Any]]:
+    """
+    Query local Prometheus HTTP API.
+
+    Returns a list of result objects or an empty list on error.
+    """
+    global _prometheus_session
+
+    if _prometheus_session is None:
+        _prometheus_session = aiohttp.ClientSession()
+
+    try:
+        async with _prometheus_session.get(
+            "http://localhost:9090/api/v1/query",
+            params={"query": query},
+            timeout=3,
+        ) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json()
+    except Exception:
+        return []
+
+    if data.get("status") != "success":
+        return []
+
+    return data.get("data", {}).get("result", [])
+
+
+async def _refresh_rpm_tpm() -> None:
+    """
+    Periodically refresh RPM/TPM metrics from Prometheus and store in stats.
+
+    This does not block request handling; it's a background task.
+    """
+    while True:
+        try:
+            # Requests per minute by operation
+            results = await _query_prometheus("rate(azure_llm_requests_total[1m]) * 60")
+            chat_rpm = 0.0
+            embed_rpm = 0.0
+            for r in results:
+                op = r.get("metric", {}).get("operation", "")
+                val = float(r.get("value", [0, "0"])[1])
+                if op == "chat_completion":
+                    chat_rpm += val
+                elif op == "embed_text":
+                    embed_rpm += val
+
+            stats["chat_rpm"] = chat_rpm
+            stats["embed_rpm"] = embed_rpm
+
+            # Tokens per minute by type/model
+            token_results = await _query_prometheus("rate(azure_llm_tokens_total[1m]) * 60")
+            chat_in = 0.0
+            chat_out = 0.0
+            embed_in = 0.0
+            for r in token_results:
+                metric = r.get("metric", {})
+                token_type = metric.get("type", "")
+                model = metric.get("model", "").lower()
+                val = float(r.get("value", [0, "0"])[1])
+
+                is_embedding_model = "embedding" in model
+
+                if token_type == "input":
+                    if is_embedding_model:
+                        embed_in += val
+                    else:
+                        chat_in += val
+                elif token_type == "output" and not is_embedding_model:
+                    chat_out += val
+
+            stats["chat_tpm_input"] = chat_in
+            stats["chat_tpm_output"] = chat_out
+            stats["embed_tpm_input"] = embed_in
+
+        except Exception:
+            # On any error, keep previous values and try again later
+            pass
+
+        # Refresh every ~10 seconds
+        await asyncio.sleep(10)
 
 
 async def background_requests():
@@ -311,6 +423,12 @@ async def dashboard_endpoint(request):
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 20px;
             margin: 20px 0;
+        }}
+        .metric-grid-small {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
         }}
         .metric-card {{
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -451,6 +569,39 @@ async def dashboard_endpoint(request):
                 <h3>Total Cost</h3>
                 <div class="value">${stats["total_cost"]:.4f}</div>
                 <div class="label">Real USD spent</div>
+            </div>
+        </div>
+
+        <h2>📈 Requests & Tokens per Minute</h2>
+        <div class="metric-grid-small">
+            <div class="metric-card">
+                <h3>Chat Requests</h3>
+                <div class="value">{stats["chat_requests"]}</div>
+                <div class="label">
+                    Total chat calls · ~{stats["chat_rpm"]:.2f} RPM (1m window)
+                </div>
+            </div>
+            <div class="metric-card">
+                <h3>Embedding Requests</h3>
+                <div class="value">{stats["embed_requests"]}</div>
+                <div class="label">
+                    Total embedding calls · ~{stats["embed_rpm"]:.2f} RPM (1m window)
+                </div>
+            </div>
+            <div class="metric-card tokens">
+                <h3>Chat Tokens</h3>
+                <div class="value">{stats["chat_tokens_input"] + stats["chat_tokens_output"]:,}</div>
+                <div class="label">
+                    Input+output tokens · in: ~{stats["chat_tpm_input"]:.0f} TPM,
+                    out: ~{stats["chat_tpm_output"]:.0f} TPM
+                </div>
+            </div>
+            <div class="metric-card tokens">
+                <h3>Embedding Tokens</h3>
+                <div class="value">{stats["embed_tokens_input"]:,}</div>
+                <div class="label">
+                    Input tokens · ~{stats["embed_tpm_input"]:.0f} TPM
+                </div>
             </div>
         </div>
 
@@ -627,14 +778,23 @@ async def init_app():
     app.router.add_get("/", dashboard_endpoint)
     app.router.add_get("/metrics", metrics_endpoint)
 
+    # Start background RPM/TPM refresher
+    app["rpm_tpm_task"] = asyncio.create_task(_refresh_rpm_tpm())
+
     return app
 
 
 async def cleanup(app):
     """Cleanup resources."""
-    global client
+    global client, _prometheus_session
     if client:
         await client.close()
+    if _prometheus_session is not None:
+        await _prometheus_session.close()
+    # Cancel background task if present
+    task = app.get("rpm_tpm_task")
+    if task is not None:
+        task.cancel()
 
 
 async def main():
