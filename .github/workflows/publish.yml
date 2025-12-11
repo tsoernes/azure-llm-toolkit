@@ -1,0 +1,70 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # e.g. v0.1.2
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # to push version bump commit back if desired
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv and build tools
+        run: |
+          pip install uv twine
+
+      - name: Derive version from tag
+        id: get_version
+        run: |
+          # Tag looks like v0.1.2 -> version 0.1.2
+          TAG="${GITHUB_REF##*/}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update version in pyproject.toml
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          echo "Setting project version to $VERSION"
+          python - << 'PY'
+          import re
+          from pathlib import Path
+
+          pyproject = Path("pyproject.toml")
+          text = pyproject.read_text(encoding="utf-8")
+          new = re.sub(
+              r'^(version\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+")',
+              f'version = "{"${{ steps.get_version.outputs.version }}"}"',
+              text,
+              flags=re.MULTILINE,
+          )
+          pyproject.write_text(new, encoding="utf-8")
+          PY
+
+      - name: Show updated pyproject
+        run: sed -n '1,40p' pyproject.toml
+
+      - name: Build package with uv
+        run: |
+          rm -rf dist
+          uv build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          twine upload dist/*
