@@ -409,6 +409,9 @@ class AzureLLMClient:
 
             except BadRequestError as e:
                 error_msg = str(e)
+                logger.warning(f"[DEBUG] BadRequestError (attempt {attempt}/{max_attempts}): {error_msg}")
+                print(f"\n[DEBUG-PRINT] BadRequestError: {error_msg}\n[DEBUG-PRINT] kwargs: {kwargs}\n", flush=True)
+                logger.warning(f"[DEBUG] Request kwargs: {kwargs}")
 
                 # Handle parameter conflicts
                 if "temperature" in error_msg and "temperature" in kwargs:
