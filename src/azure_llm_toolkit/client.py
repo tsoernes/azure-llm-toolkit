@@ -28,6 +28,7 @@ from tenacity import (
 from .cache import CacheManager, ChatCache, EmbeddingCache
 from .config import AzureConfig
 from .cost_tracker import CostEstimator, CostTracker
+from .metrics import MetricsCollector, MetricsTracker
 from .rate_limiter import RateLimiter, RateLimiterPool
 from .types import ChatCompletionResult, EmbeddingResult, QueryRewriteResult, UsageInfo
 
@@ -166,14 +167,22 @@ class AzureLLMClient:
             },
         )
 
-        # Metrics tracker (optional)
-        metrics_tracker = None
+        # Use metrics tracker as context manager if available
         if self.metrics_collector is not None:
-            metrics_tracker = MetricsTracker(self.metrics_collector).track(
-                operation="embed_text",
-                model=model,
-            )
+            async with MetricsTracker(self.metrics_collector).track("embed_text", model) as tracker:
+                return await self._embed_text_impl(text, model, track_cost, use_cache, tracker)
+        else:
+            return await self._embed_text_impl(text, model, track_cost, use_cache, None)
 
+    async def _embed_text_impl(
+        self,
+        text: str,
+        model: str,
+        track_cost: bool,
+        use_cache: bool,
+        metrics_tracker: MetricsTracker | None,
+    ) -> list[float]:
+        """Internal implementation of embed_text."""
         # Check cache if enabled
         if use_cache and self.enable_cache and self.cache_manager:
             cached_embedding = self.cache_manager.embedding_cache.get(text, model)
@@ -283,14 +292,55 @@ class AzureLLMClient:
         """
         model = model or self.config.chat_deployment
 
-        # Metrics tracker (optional)
-        metrics_tracker = None
+        # Use metrics tracker as context manager if available
         if self.metrics_collector is not None:
-            metrics_tracker = MetricsTracker(self.metrics_collector).track(
-                operation="chat_completion",
-                model=model,
+            async with MetricsTracker(self.metrics_collector).track("chat_completion", model) as tracker:
+                return await self._chat_completion_impl(
+                    messages,
+                    system_prompt,
+                    model,
+                    temperature,
+                    max_tokens,
+                    reasoning_effort,
+                    response_format,
+                    track_cost,
+                    use_cache,
+                    tools,
+                    tool_choice,
+                    tracker,
+                )
+        else:
+            return await self._chat_completion_impl(
+                messages,
+                system_prompt,
+                model,
+                temperature,
+                max_tokens,
+                reasoning_effort,
+                response_format,
+                track_cost,
+                use_cache,
+                tools,
+                tool_choice,
+                None,
             )
 
+    async def _chat_completion_impl(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str | None,
+        model: str,
+        temperature: float | None,
+        max_tokens: int | None,
+        reasoning_effort: str | None,
+        response_format: Any | None,
+        track_cost: bool,
+        use_cache: bool,
+        tools: list[dict[str, Any]] | None,
+        tool_choice: Any | None,
+        metrics_tracker: MetricsTracker | None,
+    ) -> ChatCompletionResult:
+        """Internal implementation of chat_completion."""
         # Build messages
         full_messages: list[dict[str, str]] = []
         if system_prompt:
