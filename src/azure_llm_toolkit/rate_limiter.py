@@ -253,3 +253,175 @@ def get_rate_limiter_pool() -> RateLimiterPool:
     if _default_pool is None:
         _default_pool = RateLimiterPool()
     return _default_pool
+
+
+@dataclass
+class InFlightRateLimiter:
+    """
+    Rate limiter based on requests per minute (RPM) with in-flight time window tracking.
+
+    This limiter is designed for OCR and other APIs where:
+    - The rate limit is expressed in requests per minute (RPM)
+    - Requests can take significant time to complete
+    - We want to allow multiple concurrent in-flight requests up to a time-based window
+
+    The limiter uses two mechanisms:
+    1. Token bucket for RPM enforcement (refills continuously)
+    2. Semaphore for concurrency control based on in-flight window
+
+    Concurrency is derived as: ceil((rpm / 60) * inflight_window_seconds)
+    This allows more requests to be in-flight during the window without exceeding RPM.
+
+    Example: 60 RPM with 10s window -> 10 concurrent requests allowed
+    """
+
+    rpm_limit: int = 60  # Requests per minute
+    inflight_window_seconds: float = 10.0  # Target window for in-flight requests
+
+    # Internal state
+    _rpm_bucket: float = field(default=0.0, init=False, repr=False)
+    _last_refill: float = field(default_factory=time.time, init=False, repr=False)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _semaphore: asyncio.Semaphore | None = field(default=None, init=False, repr=False)
+
+    # Tracking for metrics
+    _total_requests: int = field(default=0, init=False, repr=False)
+    _total_wait_time: float = field(default=0.0, init=False, repr=False)
+    _max_concurrent: int = field(default=0, init=False, repr=False)
+
+    def __post_init__(self):
+        """Initialize buckets and semaphore."""
+        self._rpm_bucket = float(self.rpm_limit)
+        self._last_refill = time.time()
+
+        # Calculate max concurrency from RPM and in-flight window
+        # Example: 60 RPM = 1 req/s, 10s window = 10 concurrent
+        import math
+
+        rps = self.rpm_limit / 60.0
+        max_concurrent = max(1, math.ceil(rps * self.inflight_window_seconds))
+        self._max_concurrent = max_concurrent
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+
+        logger.info(
+            f"InFlightRateLimiter initialized: {self.rpm_limit} RPM, "
+            f"{self.inflight_window_seconds}s window, "
+            f"max {max_concurrent} concurrent"
+        )
+
+    def _refill_bucket(self) -> None:
+        """Refill request bucket based on elapsed time."""
+        now = time.time()
+        elapsed = now - self._last_refill
+
+        if elapsed <= 0:
+            return
+
+        # Refill rate: requests per second
+        rpm_per_sec = self.rpm_limit / 60.0
+
+        # Add tokens proportional to elapsed time
+        self._rpm_bucket = min(self.rpm_limit, self._rpm_bucket + (rpm_per_sec * elapsed))
+
+        self._last_refill = now
+
+    def _calculate_wait_time(self) -> float:
+        """
+        Calculate how long to wait before a request can proceed.
+
+        Returns:
+            Wait time in seconds (0 if no wait needed)
+        """
+        self._refill_bucket()
+
+        # Check if we need to wait for RPM bucket
+        if self._rpm_bucket < 1:
+            # How many requests short are we?
+            shortage = 1 - self._rpm_bucket
+            # How long until we have enough? (requests per second = rpm_limit / 60)
+            wait_time = shortage / (self.rpm_limit / 60.0)
+            return wait_time
+
+        return 0.0
+
+    async def acquire(self) -> None:
+        """
+        Acquire permission to make a request.
+
+        This enforces both:
+        1. RPM limit via token bucket (may wait)
+        2. Concurrency limit via semaphore (may wait)
+
+        Blocks until the request can proceed.
+        """
+        # First acquire semaphore slot (limits concurrent in-flight requests)
+        await self._semaphore.acquire()  # type: ignore
+
+        try:
+            # Then check RPM bucket
+            async with self._lock:
+                wait_time = self._calculate_wait_time()
+
+                if wait_time > 0:
+                    logger.debug(
+                        f"RPM limit: waiting {wait_time:.2f}s (bucket: {self._rpm_bucket:.1f}/{self.rpm_limit})"
+                    )
+                    await asyncio.sleep(wait_time)
+                    self._total_wait_time += wait_time
+                    # Refill after waiting
+                    self._refill_bucket()
+
+                # Consume one request token
+                self._rpm_bucket -= 1
+                self._rpm_bucket = max(0, self._rpm_bucket)
+
+                # Track metrics
+                self._total_requests += 1
+        except Exception:
+            # If we fail after acquiring semaphore, release it
+            self._semaphore.release()  # type: ignore
+            raise
+
+    def release(self) -> None:
+        """
+        Release a request slot after completion.
+
+        Must be called after each acquire() when the request completes.
+        """
+        self._semaphore.release()  # type: ignore
+
+    async def __aenter__(self) -> InFlightRateLimiter:
+        """Context manager entry - acquire permission."""
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore
+        """Context manager exit - release permission."""
+        self.release()
+
+    def get_stats(self) -> dict[str, float | int]:
+        """
+        Get rate limiter statistics.
+
+        Returns:
+            Dict with total requests, wait time, bucket level, and concurrency settings
+        """
+        self._refill_bucket()
+        return {
+            "total_requests": self._total_requests,
+            "total_wait_time_seconds": self._total_wait_time,
+            "rpm_available": self._rpm_bucket,
+            "rpm_limit": self.rpm_limit,
+            "rpm_utilization_pct": ((self.rpm_limit - self._rpm_bucket) / self.rpm_limit * 100)
+            if self.rpm_limit > 0
+            else 0,
+            "max_concurrent": self._max_concurrent,
+            "inflight_window_seconds": self.inflight_window_seconds,
+        }
+
+    def reset(self) -> None:
+        """Reset the rate limiter to initial state."""
+        self._rpm_bucket = float(self.rpm_limit)
+        self._last_refill = time.time()
+        self._total_requests = 0
+        self._total_wait_time = 0.0

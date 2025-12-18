@@ -115,7 +115,12 @@ from .metrics import (
     PrometheusMetrics,
     create_collector_with_prometheus,
 )
-from .rate_limiter import RateLimiter, RateLimiterPool, get_rate_limiter_pool
+from .rate_limiter import (
+    InFlightRateLimiter,
+    RateLimiter,
+    RateLimiterPool,
+    get_rate_limiter_pool,
+)
 from .reranker import (
     LogprobReranker,
     RerankerConfig,
@@ -165,7 +170,7 @@ from .validation import (
     parse_json_response,
 )
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 __all__ = [
     # Main client
@@ -180,6 +185,7 @@ __all__ = [
     # Rate limiting
     "RateLimiter",
     "RateLimiterPool",
+    "InFlightRateLimiter",
     "get_rate_limiter_pool",
     # Caching
     "CacheManager",
