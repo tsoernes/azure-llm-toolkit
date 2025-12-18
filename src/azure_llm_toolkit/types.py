@@ -105,27 +105,9 @@ class EmbeddingResult:
         }
 
 
-@dataclass
-class QueryRewriteResult:
-    """Result from query rewriting."""
-
-    original: str
-    rewritten: str
-    raw_response: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "original": self.original,
-            "rewritten": self.rewritten,
-            "raw_response": self.raw_response,
-        }
-
-
 __all__ = [
     "UsageInfo",
     "CostInfo",
     "ChatCompletionResult",
     "EmbeddingResult",
-    "QueryRewriteResult",
 ]

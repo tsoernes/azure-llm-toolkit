@@ -1,5 +1,5 @@
 azure-llm-toolkit/README.md#L1-220
-# Azure LLM Toolkit (v0.1.4)
+# Azure LLM Toolkit (v0.1.5)
 
 A Python toolkit that wraps Azure OpenAI interactions with production-friendly features:
 - Rate limiting (RPM / TPM)
@@ -7,9 +7,9 @@ A Python toolkit that wraps Azure OpenAI interactions with production-friendly f
 - Retry logic and circuit-breaker patterns
 - Disk-based caching for embeddings & chat completions
 - Batch embedding (Polars-based high-performance embedder)
-- Utilities: token counting, streaming, query rewriting, reranking helpers
+- Utilities: token counting, streaming, reranking helpers
 
-This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.1.4).
+This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.1.5).
 
 ---
 ## Key components (API surface)
@@ -64,7 +64,8 @@ The library loads configuration from environment variables by default. Common va
 - `AZURE_OPENAI_API_KEY` (or `OPENAI_API_KEY`) — REQUIRED
 - `AZURE_ENDPOINT` (or `AZURE_OPENAI_ENDPOINT`) — REQUIRED (e.g. `https://your-resource.openai.azure.com`)
 - `AZURE_API_VERSION` — default: `2024-12-01-preview`
-- `AZURE_CHAT_DEPLOYMENT` — default: `gpt-4o`
+- `AZURE_CHAT_DEPLOYMENT` — default: `gpt-5-mini`
+- `AZURE_RERANKER_DEPLOYMENT` — default: `gpt-4o-east-US`
 - `AZURE_EMBEDDING_DEPLOYMENT` — default: `text-embedding-3-large`
 - `AZURE_TIMEOUT_SECONDS` — request timeout (default: `60`)
 - `AZURE_MAX_RETRIES` — default: `5`

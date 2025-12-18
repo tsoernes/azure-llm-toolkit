@@ -30,7 +30,7 @@ from .config import AzureConfig
 from .cost_tracker import CostEstimator, CostTracker
 from .metrics import MetricsCollector, MetricsTracker
 from .rate_limiter import RateLimiter, RateLimiterPool
-from .types import ChatCompletionResult, EmbeddingResult, QueryRewriteResult, UsageInfo
+from .types import ChatCompletionResult, EmbeddingResult, UsageInfo
 
 logger = logging.getLogger(__name__)
 

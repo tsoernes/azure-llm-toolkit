@@ -55,7 +55,8 @@ class AzureConfig(BaseModel):
     api_version: str = Field(default=os.getenv("AZURE_API_VERSION", "2024-12-01-preview"))
 
     # Deployment names
-    chat_deployment: str = Field(default=os.getenv("AZURE_CHAT_DEPLOYMENT", "gpt-4o"))
+    chat_deployment: str = Field(default=os.getenv("AZURE_CHAT_DEPLOYMENT", "gpt-5-mini"))
+    reranker_deployment: str = Field(default=os.getenv("AZURE_RERANKER_DEPLOYMENT", "gpt-4o-east-US"))
     embedding_deployment: str = Field(default=os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-large"))
 
     # Request configuration

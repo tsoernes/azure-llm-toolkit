@@ -152,7 +152,6 @@ from .types import (
     ChatCompletionResult,
     CostInfo,
     EmbeddingResult,
-    QueryRewriteResult,
     UsageInfo,
 )
 from .validation import (
@@ -272,7 +271,6 @@ __all__ = [
     "CostInfo",
     "ChatCompletionResult",
     "EmbeddingResult",
-    "QueryRewriteResult",
     # Batch embedder
     "PolarsBatchEmbedder",
     # Batch runners

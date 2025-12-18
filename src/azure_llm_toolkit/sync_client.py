@@ -236,33 +236,21 @@ class AzureLLMClientSync:
             ChatCompletionResult with response and metadata
         """
         client = self._get_or_create_client()
-        # Dynamically resolve and invoke chat_completion through a Any-typed wrapper.
-        # This avoids static call-arg complaints from strict type checkers while preserving runtime behavior.
-        from typing import Any, cast
 
-        _chat_fn: Any = getattr(client, "chat_completion")  # type: ignore[attr-defined]
-
-        def _invoke_any(fn: Any, **kwargs: Any) -> Any:
-            """Invoke a dynamically-typed callable with kwargs."""
-            return fn(**kwargs)
-
-        result = self._run_async(
-            _invoke_any(
-                _chat_fn,
-                **{
-                    "messages": messages,
-                    "system_prompt": system_prompt,
-                    "model": model,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "reasoning_effort": reasoning_effort,
-                    "response_format": response_format,
-                    "track_cost": track_cost,
-                    "use_cache": use_cache,
-                    "tools": tools,
-                    "tool_choice": tool_choice,
-                },
-            )  # type: ignore[call-arg,reportCallIssue]
+        return self._run_async(
+            client.chat_completion(
+                messages=messages,
+                system_prompt=system_prompt,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
+                response_format=response_format,
+                track_cost=track_cost,
+                use_cache=use_cache,
+                tools=tools,
+                tool_choice=tool_choice,
+            )
         )
         # Cast to the declared return type for the benefit of static type-checkers.
         return cast(ChatCompletionResult, result)
@@ -357,36 +345,6 @@ class AzureLLMClientSync:
             tokens_input=input_tokens,
             tokens_output=estimated_output_tokens,
         )
-
-    # ==================== Advanced Methods ====================
-
-    def rewrite_query(
-        self,
-        query: str,
-        num_variations: int = 1,
-        model: str | None = None,
-    ) -> QueryRewriteResult:
-        """
-        Rewrite a query for better retrieval (synchronous).
-
-        Args:
-            query: Original query
-            num_variations: Number of variations to generate
-            model: Optional model override
-
-        Returns:
-            QueryRewriteResult with rewritten query
-        """
-        # Resolve the underlying async client's method dynamically and call it.
-        # We call via a kwargs dict and use targeted type ignores so static analyzers
-        # don't raise call-arg errors for third-party client methods while preserving
-        # runtime behavior.
-        client = self._get_or_create_client()
-        from typing import Any, cast
-
-        _rewrite_fn: Any = getattr(client, "rewrite_query")  # type: ignore[attr-defined]
-        result = self._run_async(_rewrite_fn(**{"query": query, "num_variations": num_variations, "model": model}))  # type: ignore[call-arg]
-        return cast(QueryRewriteResult, result)  # type: ignore[return-value]
 
     # ==================== Context Manager Support ====================
 
