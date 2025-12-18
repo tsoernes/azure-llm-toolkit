@@ -25,6 +25,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from .config import AzureConfig
 from .cost_tracker import CostEstimator
+from .rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,10 @@ class PolarsBatchEmbedder:
         max_lists_per_query: int = 2048,
         sleep_sec: int = 60,
         sleep_inc: int = 5,
+        use_rate_limiting: bool = True,
+        rate_limiter: RateLimiter | None = None,
+        use_batch_api: bool = False,
+        batch_api_client: Any | None = None,
         cost_estimator: CostEstimator | None = None,
     ) -> None:
         """
@@ -76,6 +81,10 @@ class PolarsBatchEmbedder:
             max_lists_per_query: Maximum number of texts per API call
             sleep_sec: Initial sleep time on rate limit error (seconds)
             sleep_inc: Sleep time increment on consecutive errors (seconds)
+            use_rate_limiting: Whether to use the provided rate_limiter for batch calls
+            rate_limiter: Optional RateLimiter instance to coordinate batch-level acquires
+            use_batch_api: If True, use the (future) Batch API path for embedding operations
+            batch_api_client: Optional client/handler for the Batch API (pass None to use default)
             cost_estimator: Optional cost estimator for tracking
         """
         self.config = config
@@ -84,6 +93,10 @@ class PolarsBatchEmbedder:
         self.max_lists_per_query = max_lists_per_query
         self.sleep_sec = sleep_sec
         self.sleep_inc = sleep_inc
+        self.use_rate_limiting = use_rate_limiting
+        self.rate_limiter = rate_limiter
+        self.use_batch_api = use_batch_api
+        self.batch_api_client = batch_api_client
         self.cost_estimator = cost_estimator or CostEstimator(currency="kr")
 
         # Initialize tokenizer
@@ -362,10 +375,22 @@ class PolarsBatchEmbedder:
 
         for batch_idx, batch in enumerate(iterator):
             try:
+                # If a RateLimiter was provided to the embedder, acquire tokens for the whole batch
+                # before issuing the batch request. This integrates with external rate-limiting
+                # infrastructure when desired.
+                if getattr(self, "use_rate_limiting", False) and getattr(self, "rate_limiter", None):
+                    try:
+                        estimated_tokens_batch = sum(len(token_list) for token_list in batch)
+                        # The RateLimiter API is async; call acquire and ignore any errors (best-effort)
+                        await self.rate_limiter.acquire(tokens=estimated_tokens_batch)  # type: ignore[attr-defined]
+                    except Exception:
+                        # If the external limiter fails, continue without raising to avoid blocking embedding
+                        logger.debug("Batch embedder: rate_limiter.acquire failed or not available; continuing")
+
                 batch_embeddings = await self._embed_token_lists(batch)
                 all_embeddings.extend(batch_embeddings)
 
-                # Sleep between batches to respect rate limits (except last batch)
+                # Sleep between batches to respect local sleep/backoff settings (except last batch)
                 if batch_idx < len(batches) - 1:
                     await asyncio.sleep(self.sleep_sec)
 

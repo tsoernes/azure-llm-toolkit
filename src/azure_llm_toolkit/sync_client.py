@@ -23,7 +23,7 @@ import numpy as np
 
 from .client import AzureLLMClient
 from .config import AzureConfig
-from .types import ChatCompletionResult, EmbeddingResult, QueryRewriteResult
+from .types import ChatCompletionResult, EmbeddingResult
 
 logger = logging.getLogger(__name__)
 
