@@ -1,707 +1,322 @@
-# Azure LLM Toolkit
+azure-llm-toolkit/README.md#L1-220
+# Azure LLM Toolkit (v0.1.4)
 
-A comprehensive Python library for working with Azure OpenAI APIs, featuring rate limiting, cost tracking, retry logic, and more.
+A Python toolkit that wraps Azure OpenAI interactions with production-friendly features:
+- Rate limiting (RPM / TPM)
+- Cost estimation & pluggable cost tracking
+- Retry logic and circuit-breaker patterns
+- Disk-based caching for embeddings & chat completions
+- Batch embedding (Polars-based high-performance embedder)
+- Utilities: token counting, streaming, query rewriting, reranking helpers
 
-## Features
+This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.1.4).
 
-- **Automatic Rate Limiting**: Built-in TPM (Tokens Per Minute) and RPM (Requests Per Minute) rate limiting using token bucket algorithm
-- **Cost Tracking & Estimation**: Track and estimate costs for all API calls with configurable pricing
-- **Retry Logic**: Exponential backoff retry logic for handling transient failures
-- **Disk-Based Caching**: Cache embeddings and chat completions to disk to avoid redundant API calls and save costs
-- **Batch Processing**: Efficient batch embedding with automatic splitting
-- **High-Performance Batch Embedder**: Advanced Polars-based batch embedder for processing large datasets with intelligent batching and weighted averaging
-- **Chat Completions**: Support for chat completions with reasoning models (GPT-4o, o1, etc.)
-- **Logprob-Based Reranker**: Zero-shot semantic reranking using token log probabilities for calibrated relevance scoring
-- **Query Rewriting**: LLM-powered query rewriting for better retrieval
-- **Metadata Extraction**: Extract structured metadata from filenames and content
-- **Token Counting**: Accurate token counting using tiktoken
-- **Type-Safe**: Full type hints and Pydantic models for configuration
+---
+## Key components (API surface)
 
+Top-level imports you will typically use:
+
+- `AzureConfig` — configuration loader for environment / constructor-based config
+- `AzureLLMClient` — async client with:
+  - `embed_text(...)` — embed a single text (async)
+  - `chat_completion(...)` — chat completion (async)
+  - `chat_completion_stream(...)` — streaming chat completions (async generator)
+  - token counting helpers: `count_tokens(...)`, `count_message_tokens(...)`
+  - cost estimation helpers: `estimate_embedding_cost(...)`, `estimate_chat_cost(...)`
+- `AzureLLMClientSync` — synchronous wrapper that runs the async client in an event loop
+- `PolarsBatchEmbedder` — high-performance batch embedder for large datasets (async)
+- `CostEstimator`, `CostTracker`, `InMemoryCostTracker` — cost estimation and tracking
+- `RateLimiter`, `RateLimiterPool` — rate limiting primitives
+- `CacheManager`, `EmbeddingCache`, `ChatCache` — disk-based caches for embeddings / chat responses
+- `LogprobReranker`, `create_reranker` — logprob-based reranker utilities
+- `detect_embedding_dimension(config)` — probe or read cached embedding dimensionality
+
+(See the package `azure_llm_toolkit.__init__` for the full exported list.)
+
+---
 ## Installation
 
-```bash
+Install from PyPI:
+
+```/dev/null/example.md#L1-4
 pip install azure-llm-toolkit
 ```
 
-Or install from source:
+Or install editable from source:
 
-```bash
+```/dev/null/example.md#L1-4
 git clone https://github.com/torsteinsornes/azure-llm-toolkit.git
 cd azure-llm-toolkit
 pip install -e .
 ```
 
-## Quick Start
+Development extras:
 
-### Basic Configuration
-
-Set up your Azure OpenAI credentials via environment variables:
-
-```bash
-export AZURE_OPENAI_API_KEY="your-api-key"
-export AZURE_ENDPOINT="https://your-resource.openai.azure.com"
-export AZURE_CHAT_DEPLOYMENT="gpt-4o"
-export AZURE_EMBEDDING_DEPLOYMENT="text-embedding-3-large"
+```/dev/null/example.md#L1-4
+pip install -e ".[dev]"
 ```
 
-Or use a `.env` file:
+---
+## Configuration
 
-```env
-AZURE_OPENAI_API_KEY=your-api-key
-AZURE_ENDPOINT=https://your-resource.openai.azure.com
-AZURE_CHAT_DEPLOYMENT=gpt-4o
-AZURE_EMBEDDING_DEPLOYMENT=text-embedding-3-large
-```
+The library loads configuration from environment variables by default. Common variables:
 
-### Simple Usage
+- `AZURE_OPENAI_API_KEY` (or `OPENAI_API_KEY`) — REQUIRED
+- `AZURE_ENDPOINT` (or `AZURE_OPENAI_ENDPOINT`) — REQUIRED (e.g. `https://your-resource.openai.azure.com`)
+- `AZURE_API_VERSION` — default: `2024-12-01-preview`
+- `AZURE_CHAT_DEPLOYMENT` — default: `gpt-4o`
+- `AZURE_EMBEDDING_DEPLOYMENT` — default: `text-embedding-3-large`
+- `AZURE_TIMEOUT_SECONDS` — request timeout (default: `60`)
+- `AZURE_MAX_RETRIES` — default: `5`
+- `TOKENIZER_MODEL` — model used by tiktoken for token counting (defaults to chat deployment)
+- `FORCE_EMBED_DIM` — optional integer to force embedding dim (useful in tests/offline)
 
-```python
+You can also pass these values directly when constructing `AzureConfig(...)`.
+
+---
+## Quick start — async (basic)
+
+Below are succinct examples showing common workflows.
+
+Embed a single text (async):
+
+```/dev/null/example.md#L1-40
 import asyncio
 from azure_llm_toolkit import AzureConfig, AzureLLMClient
 
 async def main():
-    # Create configuration (loads from environment variables)
-    config = AzureConfig()
-    
-    # Create client
+    config = AzureConfig()  # loads from env by default
     client = AzureLLMClient(config=config)
-    
-    # Generate embeddings
-    result = await client.embed_texts([
-        "Hello, world!",
-        "Azure OpenAI is powerful",
-    ])
-    print(f"Generated {len(result.embeddings)} embeddings")
-    print(f"Usage: {result.usage.total_tokens} tokens")
-    
-    # Chat completion
-    response = await client.chat_completion(
-        messages=[
-            {"role": "user", "content": "What is machine learning?"}
-        ],
-        system_prompt="You are a helpful AI assistant."
-    )
-    print(f"Response: {response.content}")
-    print(f"Tokens: {response.usage.total_tokens}")
+
+    emb = await client.embed_text("Hello, world!")
+    print(f"Embedding length: {len(emb)}")
+    print(f"First 8 dims: {emb[:8]}")
 
 asyncio.run(main())
 ```
 
-## Advanced Usage
+Chat completion (async):
 
-### Logprob-Based Reranking
+```/dev/null/example.md#L1-80
+import asyncio
+from azure_llm_toolkit import AzureConfig, AzureLLMClient
 
-The library includes a powerful logprob-based reranker that provides calibrated relevance scores without requiring fine-tuning or specialized models. It uses token log probabilities from Azure OpenAI's chat completions to score documents.
+async def main():
+    config = AzureConfig()
+    client = AzureLLMClient(config=config)
 
-**Built-in Rate Limiting**: The reranker includes automatic rate limiting (default: 2700 RPM, 450k TPM) to prevent hitting Azure OpenAI quotas during parallel document scoring.
+    messages = [{"role": "user", "content": "Explain supervised learning in simple terms."}]
+    result = await client.chat_completion(messages=messages, system_prompt="You are a helpful assistant.")
+    print("Response:")
+    print(result.content)
+    print("Usage (tokens):", result.usage.total_tokens)
 
-#### Basic Reranking
-
-```python
-from azure_llm_toolkit import AzureLLMClient, AzureConfig
-from azure_llm_toolkit.reranker import LogprobReranker
-
-config = AzureConfig()
-client = AzureLLMClient(config=config)
-
-# Create reranker (defaults to gpt-4o-east-US)
-reranker = LogprobReranker(client=client)
-
-query = "What is machine learning?"
-documents = [
-    "Machine learning is a subset of AI that enables systems to learn from data.",
-    "Python is a programming language.",
-    "Deep learning uses neural networks with multiple layers.",
-]
-
-# Rerank documents by relevance
-results = await reranker.rerank(query, documents, top_k=2)
-
-for result in results:
-    print(f"Score: {result.score:.3f} - {result.document}")
+asyncio.run(main())
 ```
 
-#### Custom Configuration
+Streaming chat completion:
 
-```python
-from azure_llm_toolkit.reranker import RerankerConfig, create_reranker
+```/dev/null/example.md#L1-80
+import asyncio
+from azure_llm_toolkit import AzureConfig, AzureLLMClient
 
-# Custom configuration with 5-level relevance scale
-reranker = create_reranker(
-    client=client,
-    model="gpt-4o",
-    bins=["0", "1", "2", "3", "4"],  # 5-level scale instead of default 11
-    temperature=0.1,  # Lower temperature for more deterministic scores
-    top_logprobs=3,
-)
+async def stream_example():
+    client = AzureLLMClient(AzureConfig())
+    async for chunk in client.chat_completion_stream(
+        messages=[{"role":"user","content":"Tell me a short story about a robot."}],
+        system_prompt="You are a creative storyteller."
+    ):
+        print(chunk, end="", flush=True)
 
-results = await reranker.rerank(query, documents)
+asyncio.run(stream_example())
 ```
 
-#### Integration with RAG Pipelines
+---
+## Quick start — batch embeddings (Polars)
 
-```python
-# Step 1: Retrieve candidates from vector database
-retrieved_docs = vector_db.similarity_search(query, k=20)
+When embedding large corpora, use `PolarsBatchEmbedder` which tokenizes in parallel, batches intelligently, and supports weighted averaging for splits.
 
-# Step 2: Rerank for better relevance
-reranker = LogprobReranker(client=client)
-reranked = await reranker.rerank(query, retrieved_docs, top_k=5)
+Example (async):
 
-# Step 3: Use top documents as context
-context = "\n\n".join([r.document for r in reranked[:3]])
-
-# Step 4: Generate answer
-response = await client.chat_completion(
-    messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}],
-    system_prompt="Answer based on the provided context.",
-)
-```
-
-#### Bin Probability Distributions
-
-Get detailed probability distributions over relevance bins:
-
-```python
-results = await reranker.rerank(
-    query, 
-    documents, 
-    include_bin_probs=True
-)
-
-for result in results:
-    print(f"Score: {result.score:.3f}")
-    print(f"Bin probabilities: {result.bin_probabilities}")
-```
-
-#### Rate Limiting
-
-The reranker includes automatic rate limiting to handle parallel document scoring safely:
-
-```python
-from azure_llm_toolkit.reranker import create_reranker
-
-# Use default limits (2700 RPM, 450k TPM)
-reranker = create_reranker(client=client)
-
-# Custom rate limits
-reranker = create_reranker(
-    client=client,
-    model="gpt-4o",
-    rpm_limit=3000,  # Requests per minute
-    tpm_limit=500000,  # Tokens per minute
-)
-
-# Use shared rate limiter across multiple rerankers
-from azure_llm_toolkit import RateLimiter
-
-shared_limiter = RateLimiter(rpm_limit=5000, tpm_limit=600000)
-reranker1 = LogprobReranker(client=client, rate_limiter=shared_limiter)
-reranker2 = LogprobReranker(client=client, rate_limiter=shared_limiter)
-```
-
-**Key Features:**
-- Zero-shot: No training or fine-tuning required
-- Calibrated: Provides probabilistic relevance scores in [0.0, 1.0]
-- Model-agnostic: Works with any Azure OpenAI model that supports logprobs (gpt-4o, gpt-4-turbo, etc.)
-- Cost-effective: Uses only 1 token per document for scoring
-- Built-in rate limiting: Prevents quota exhaustion during parallel scoring (2700 RPM, 450k TPM defaults)
-- Parallel execution: Efficiently scores multiple documents concurrently with asyncio
-- Integrates seamlessly with AzureLLMClient for cost tracking and rate limiting
-
-### Rate Limiting
-
-Rate limiting is enabled by default and prevents hitting Azure OpenAI quota limits:
-
-```python
-from azure_llm_toolkit import AzureLLMClient, RateLimiterPool
-
-# Configure custom rate limits
-rate_limiter_pool = RateLimiterPool(
-    default_rpm=3000,  # Requests per minute
-    default_tpm=300000  # Tokens per minute
-)
-
-client = AzureLLMClient(
-    enable_rate_limiting=True,
-    rate_limiter_pool=rate_limiter_pool
-)
-
-# The client will automatically throttle requests to stay within limits
-for i in range(1000):
-    result = await client.embed_text(f"Document {i}")
-    print(f"Embedded document {i}")
-```
-
-### Cost Tracking
-
-Track costs for all API operations:
-
-```python
-from azure_llm_toolkit import (
-    AzureLLMClient,
-    InMemoryCostTracker,
-    CostEstimator
-)
-
-# Create cost tracker
-cost_tracker = InMemoryCostTracker(currency="kr")
-
-# Create cost estimator with custom pricing
-cost_estimator = CostEstimator(currency="kr")
-cost_estimator.set_model_pricing(
-    model="gpt-4o",
-    input_price=41.25,  # per 1M tokens
-    output_price=165.00,
-    cached_input_price=20.63
-)
-
-# Create client with cost tracking
-client = AzureLLMClient(
-    cost_tracker=cost_tracker,
-    cost_estimator=cost_estimator
-)
-
-# Perform operations
-await client.chat_completion(
-    messages=[{"role": "user", "content": "Hello!"}],
-    track_cost=True  # Enable cost tracking for this call
-)
-
-# Get cost summary
-summary = cost_tracker.get_summary()
-print(f"Total cost: {summary['total_cost']:.2f} {summary['currency']}")
-print(f"By category: {summary['by_category']}")
-print(f"By model: {summary['by_model']}")
-```
-
-### Custom Cost Tracker
-
-Implement your own cost tracker (e.g., database-backed):
-
-```python
-from azure_llm_toolkit import CostTracker
-from typing import Any
-
-class DatabaseCostTracker(CostTracker):
-    def __init__(self, db_connection):
-        self.db = db_connection
-    
-    def record_cost(
-        self,
-        category: str,
-        model: str,
-        tokens_input: int,
-        tokens_output: int,
-        tokens_cached_input: int,
-        currency: str,
-        amount: float,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        self.db.execute(
-            "INSERT INTO costs (category, model, tokens_input, tokens_output, amount) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (category, model, tokens_input, tokens_output, amount)
-        )
-    
-    def get_total_cost(self, category: str | None = None) -> float:
-        if category:
-            return self.db.query("SELECT SUM(amount) FROM costs WHERE category = ?", (category,))
-        return self.db.query("SELECT SUM(amount) FROM costs")
-
-# Use custom tracker
-tracker = DatabaseCostTracker(my_db)
-client = AzureLLMClient(cost_tracker=tracker)
-```
-
-### Batch Embeddings
-
-Efficiently embed large numbers of texts:
-
-```python
-# Embed many documents with automatic batching
-documents = [f"Document {i}" for i in range(10000)]
-
-result = await client.embed_texts(
-    texts=documents,
-    batch_size=100,  # Process 100 at a time
-    track_cost=True
-)
-
-print(f"Embedded {len(result.embeddings)} documents")
-print(f"Total tokens: {result.usage.total_tokens}")
-```
-
-### High-Performance Batch Embedding with Polars
-
-For large-scale embedding tasks, use the Polars-based batch embedder:
-
-```python
+```/dev/null/example.md#L1-200
+import asyncio
 import polars as pl
 from azure_llm_toolkit import AzureConfig, PolarsBatchEmbedder
 
-# Create DataFrame with texts
-df = pl.DataFrame({
-    "id": range(10000),
-    "text": [f"Document {i} content..." for i in range(10000)]
-})
+async def main():
+    config = AzureConfig()
+    embedder = PolarsBatchEmbedder(config=config, max_tokens_per_minute=450_000, max_lists_per_query=1024)
 
-# Configure embedder
-config = AzureConfig()
-embedder = PolarsBatchEmbedder(
-    config=config,
-    max_tokens_per_minute=450_000,  # Adjust based on your quota
-    max_lists_per_query=1000,  # Texts per API call
-)
+    df = pl.DataFrame({"id": list(range(1000)), "text": [f"Document {i}" for i in range(1000)]})
+    result_df = await embedder.embed_dataframe(df, text_column="text", verbose=True)
 
-# Embed entire DataFrame
-result_df = await embedder.embed_dataframe(df, text_column="text")
+    # result_df includes columns: text, text.tokens (token ids), text.token_count, text.embedding
+    print("Embedded rows:", len(result_df))
 
-# Result includes:
-# - Original columns
-# - text.tokens: Token IDs
-# - text.token_count: Token counts
-# - text.embedding: Embedding vectors
-
-print(f"Embedded {len(result_df)} documents")
-print(f"Total tokens: {result_df['text.token_count'].sum():,}")
-
-# Save to Parquet for later use
-result_df.write_parquet("embeddings.parquet")
+asyncio.run(main())
 ```
 
-Features of the Polars batch embedder:
-- **Intelligent batching**: Automatically creates batches based on token and list limits
-- **Weighted averaging**: Handles texts exceeding token limits by splitting and averaging
-- **Incremental processing**: Only embed new documents (skip existing embeddings)
-- **Progress tracking**: Built-in tqdm progress bars
-- **High performance**: Uses multiprocessing for tokenization and Polars for data operations
-- **Disk caching**: Optional saving of intermediate results
+---
+## Caching
 
-### Disk-Based Caching
+If enabled, the client caches embeddings and chat completions on disk (content-based keys). Example usage:
 
-Save costs and improve performance by caching LLM responses:
+```/dev/null/example.md#L1-80
+from azure_llm_toolkit import AzureConfig, AzureLLMClient
 
-```python
-from azure_llm_toolkit import AzureConfig, AzureLLMClient, CacheManager
-
-# Create client with caching enabled (default)
 config = AzureConfig()
 client = AzureLLMClient(config=config, enable_cache=True)
 
-texts = ["Hello world", "Azure OpenAI", "Machine learning"]
+# First call — hits API
+emb1 = await client.embed_text("Cache demo text", use_cache=True)
 
-# First call - hits the API
-result1 = await client.embed_texts(texts, use_cache=True)
-print(f"Generated {len(result1.embeddings)} embeddings")
-
-# Second call - retrieves from cache (no API call, no cost!)
-result2 = await client.embed_texts(texts, use_cache=True)
-print(f"Retrieved {len(result2.embeddings)} embeddings from cache")
-
-# Works with chat completions too
-messages = [{"role": "user", "content": "What is AI?"}]
-response1 = await client.chat_completion(messages, use_cache=True)  # API call
-response2 = await client.chat_completion(messages, use_cache=True)  # From cache
-
-# Get cache statistics
-cache_manager = client.cache_manager
-stats = cache_manager.get_stats()
-print(f"Cache size: {stats['total_size_mb']:.2f} MB")
-print(f"Total files: {stats['total_files']}")
-
-# Clear cache when needed
-cache_manager.clear_all()
+# Second call — should be a cache hit
+emb2 = await client.embed_text("Cache demo text", use_cache=True)
 ```
 
-Features of the caching system:
-- **Automatic caching**: Embeddings and chat completions are automatically cached
-- **Content-based**: Cache keys based on content, model, and parameters
-- **Partial hits**: Smart handling of partial cache hits in batch operations
-- **Cost savings**: Avoid redundant API calls and reduce costs
-- **Custom directories**: Configure cache location
-- **Easy management**: Get stats and clear cache as needed
+You can access cache statistics via `client.cache_manager.get_stats()` when `CacheManager` is used.
 
-### Query Rewriting
+---
+## Rate limiting
 
-Improve retrieval by rewriting queries:
+By default, `AzureLLMClient` creates a `RateLimiterPool` to throttle requests. You can provide a custom pool:
 
-```python
-# Rewrite a query for better search results
-original_query = "how to train ml model"
+```/dev/null/example.md#L1-40
+from azure_llm_toolkit import AzureConfig, AzureLLMClient, RateLimiterPool
 
-rewrite_result = await client.rewrite_query(original_query)
-
-print(f"Original: {rewrite_result.original}")
-print(f"Rewritten: {rewrite_result.rewritten}")
-# Output:
-# Original: how to train ml model
-# Rewritten: What are the best practices and step-by-step procedures 
-#            for training a machine learning model?
+pool = RateLimiterPool(default_rpm=3000, default_tpm=300_000)
+client = AzureLLMClient(config=AzureConfig(), rate_limiter_pool=pool, enable_rate_limiting=True)
 ```
 
-### Metadata Extraction
+The Polars embedder also respects token/list limits configured at construction.
 
-Extract structured metadata from documents:
+---
+## Cost estimation & tracking
 
-```python
-# Extract metadata from filename
-metadata = await client.extract_metadata_from_filename(
-    "2024-Q4-Financial-Report-Final.pdf"
-)
-print(metadata)
-# Output: {'title': 'Financial Report', 'date': '2024-Q4', 
-#          'document_type': 'report', 'status': 'final'}
+Use `CostEstimator` to estimate costs before making calls; use `InMemoryCostTracker` (or implement `CostTracker`) to record costs after calls.
 
-# Extract metadata from content
-content = """
-Title: Machine Learning Best Practices
-Author: John Doe
-Date: 2024-12-01
+Estimate cost for a chat:
 
-This document covers best practices for ML...
-"""
+```/dev/null/example.md#L1-40
+from azure_llm_toolkit import AzureConfig, AzureLLMClient, CostEstimator
 
-metadata = await client.extract_metadata_from_content(
-    content=content,
-    filename="ml-best-practices.md"
-)
-print(metadata)
-# Output: {'title': 'Machine Learning Best Practices', 
-#          'author': 'John Doe', 'date': '2024-12-01', ...}
-```
-
-### RAG-Style Question Answering
-
-Generate answers with context:
-
-```python
-context = """
-Azure OpenAI Service provides REST API access to OpenAI's powerful 
-language models including GPT-4, GPT-3.5-Turbo, and Embeddings models.
-"""
-
-question = "What models does Azure OpenAI provide?"
-
-result = await client.generate_answer(
-    question=question,
-    context=context,
-    system_prompt="Answer based on the context provided."
-)
-
-print(result.content)
-# Output: Azure OpenAI Service provides access to GPT-4, GPT-3.5-Turbo, 
-#         and Embeddings models.
-```
-
-### Reasoning Models (o1, GPT-5)
-
-Use reasoning models with appropriate settings:
-
-```python
-# Use reasoning effort parameter for o1/GPT-5 models
-response = await client.chat_completion(
-    messages=[
-        {"role": "user", "content": "Solve this complex problem: ..."}
-    ],
-    model="o1-preview",
-    reasoning_effort="high",  # or "low", "medium"
-)
-
-print(f"Answer: {response.content}")
-print(f"Finish reason: {response.finish_reason}")
-```
-
-### Token Counting
-
-Estimate tokens before making API calls:
-
-```python
-# Count tokens in text
-text = "This is a sample text for token counting."
-token_count = client.count_tokens(text)
-print(f"Text has {token_count} tokens")
-
-# Count tokens in messages
-messages = [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "What is AI?"}
-]
-token_count = client.count_message_tokens(messages)
-print(f"Messages have {token_count} tokens")
-
-# Estimate cost before calling
-cost = client.estimate_chat_cost(
-    messages=messages,
-    estimated_output_tokens=500
-)
-print(f"Estimated cost: {cost:.4f} kr")
-```
-
-### Custom Configuration
-
-Override default configuration:
-
-```python
-from pathlib import Path
-
-config = AzureConfig(
-    api_key="your-key",
-    endpoint="https://your-resource.openai.azure.com",
-    api_version="2024-12-01-preview",
-    chat_deployment="gpt-4o",
-    embedding_deployment="text-embedding-3-large",
-    timeout_seconds=120,
-    max_retries=10,
-    tokenizer_model="gpt-4o",
-    cache_dir=Path.home() / ".cache" / "azure-llm-toolkit"
-)
-
+config = AzureConfig()
 client = AzureLLMClient(config=config)
+est = client.estimate_chat_cost(messages=[{"role":"user","content":"Hello"}], estimated_output_tokens=200)
+print("Estimated cost:", est)
 ```
 
-## Configuration Reference
+Record costs automatically by passing a `CostTracker` to the client (example in docs and tests). `InMemoryCostTracker` can be used for quick local tracking.
 
-### Environment Variables
+---
+## Reranker (logprob-based)
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key | Required |
-| `AZURE_ENDPOINT` | Azure OpenAI endpoint URL | Required |
-| `AZURE_API_VERSION` | API version | `2024-12-01-preview` |
-| `AZURE_CHAT_DEPLOYMENT` | Chat model deployment name | `gpt-4o` |
-| `AZURE_EMBEDDING_DEPLOYMENT` | Embedding model deployment name | `text-embedding-3-large` |
-| `AZURE_TIMEOUT_SECONDS` | Request timeout in seconds | `60` |
-| `AZURE_MAX_RETRIES` | Maximum retry attempts | `5` |
-| `TOKENIZER_MODEL` | Tokenizer model name | `gpt-4o` |
-| `FORCE_EMBED_DIM` | Force embedding dimension (for testing) | None |
+The toolkit includes a logprob-based reranker that uses token log probabilities to produce calibrated relevance scores. Typical flow:
 
-### Default Pricing (NOK per 1M tokens)
+- Retrieve candidate docs via vector DB
+- Use `LogprobReranker` / `create_reranker` to score documents
+- Optionally rerank and return top-K
 
-| Model | Input | Output | Cached Input |
-|-------|-------|--------|--------------|
-| gpt-4o | 41.25 | 165.00 | 20.63 |
-| gpt-4o-mini | 1.24 | 4.95 | 0.62 |
-| gpt-4-turbo | 82.50 | 247.50 | 41.25 |
-| o1-preview | 123.75 | 495.00 | 61.88 |
-| o1-mini | 24.75 | 99.00 | 12.38 |
-| text-embedding-3-large | 1.03 | - | - |
-| text-embedding-3-small | 0.17 | - | - |
+Example (async):
 
-## Architecture
+```/dev/null/example.md#L1-120
+from azure_llm_toolkit import AzureConfig, AzureLLMClient
+from azure_llm_toolkit.reranker import create_reranker
 
-### Rate Limiting
+config = AzureConfig()
+client = AzureLLMClient(config=config)
 
-The library implements a token bucket algorithm for rate limiting:
+reranker = create_reranker(client=client, model="gpt-4o")
+results = await reranker.rerank("What is machine learning?", ["Doc A text", "Doc B text"], top_k=3)
 
-- **TPM (Tokens Per Minute)**: Limits total tokens processed per minute
-- **RPM (Requests Per Minute)**: Limits number of requests per minute
-- **Automatic throttling**: Requests are queued and delayed as needed
-- **Per-model limits**: Different rate limits for different models
+for r in results:
+    print(r.score, r.document)
+```
 
-### Retry Logic
+Note: the reranker requires a model that supports logprobs.
 
-Automatic retry with exponential backoff for:
+---
+## Synchronous usage (legacy code)
 
-- `APIConnectionError`: Network connectivity issues
-- `RateLimitError`: API rate limit errors
-- `APITimeoutError`: Request timeout errors
-- `APIStatusError`: Server-side errors
+The `AzureLLMClientSync` provides blocking wrappers:
 
-Retry configuration:
-- Initial delay: 1 second
-- Maximum delay: 10 seconds
-- Maximum attempts: 5
+```/dev/null/example.md#L1-80
+from azure_llm_toolkit import AzureConfig, AzureLLMClientSync
 
-### Cost Tracking
+client = AzureLLMClientSync(config=AzureConfig())
+embedding = client.embed_text("Hello sync world")
+response = client.chat_completion(messages=[{"role":"user","content":"Hi"}])
+print(response.content)
+```
 
-Cost tracking supports:
+(Under the hood this runs the async client in an event loop or a background thread if already inside an event loop.)
 
-- **Category-based tracking**: Separate costs by category (embedding, chat, etc.)
-- **Model-based tracking**: Track costs per model
-- **Token breakdown**: Input, output, and cached tokens
-- **Custom implementations**: Implement your own `CostTracker` protocol
+---
+## Utilities
 
-## Development
+- `detect_embedding_dimension(config)` — probe the configured embedding deployment to detect vector dimensionality (with caching).
+- `AzureConfig.count_tokens(...)` and client helpers for token counting.
+- Streaming sinks, tools for function-calling integrations, health checks, metrics collector interfaces (Prometheus / OpenTelemetry helpers), and more — see `src/azure_llm_toolkit/` for modules and docstrings.
 
-### Setup
+---
+## Development & testing
 
-```bash
-# Clone repository
-git clone https://github.com/torsteinsornes/azure-llm-toolkit.git
-cd azure-llm-toolkit
+Install dev dependencies:
 
-# Install with development dependencies
+```/dev/null/example.md#L1-4
 pip install -e ".[dev]"
 ```
 
-### Testing
+Run tests:
 
-```bash
-# Run tests
-pytest
+```/dev/null/example.md#L1-4
+pytest -q
+```
 
-# Run with coverage
-pytest --cov=azure_llm_toolkit --cov-report=html
+Type checking:
 
-# Type checking
+```/dev/null/example.md#L1-4
 basedpyright src/
 mypy src/
 ```
 
-### Code Quality
+Formatting & linting:
 
-```bash
-# Format code
+```/dev/null/example.md#L1-4
 ruff format .
-
-# Lint code
 ruff check .
-
-# Fix linting issues
-ruff check --fix .
 ```
 
+---
 ## Contributing
 
-Contributions are welcome! Please:
+1. Fork the repo
+2. Create a branch (`git checkout -b feature/awesome`)
+3. Add tests for new functionality
+4. Ensure tests and static checks pass
+5. Open a PR with a clear description
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass (`pytest`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+See `CONTRIBUTING.md` for more details.
 
+---
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see the `LICENSE` file.
 
-## Acknowledgments
+---
+## Where to look next (code entry points)
 
-- Built on top of the official [OpenAI Python SDK](https://github.com/openai/openai-python)
-- Uses [tiktoken](https://github.com/openai/tiktoken) for accurate token counting
-- Inspired by the need for robust Azure OpenAI client tooling
+- `src/azure_llm_toolkit/client.py` — async client implementation and chat/embedding primitives
+- `src/azure_llm_toolkit/config.py` — configuration and tokenization helpers
+- `src/azure_llm_toolkit/batch_embedder.py` — `PolarsBatchEmbedder` implementation
+- `src/azure_llm_toolkit/sync_client.py` — synchronous wrapper
+- `src/azure_llm_toolkit/reranker.py` — reranking utilities
+- `src/azure_llm_toolkit/cache.py` — caching primitives
 
-## Support
+If you need curated examples, the `examples/` directory contains runnable demos for caching, batching, reranking, and Prometheus / dashboard integrations.
 
-For issues, questions, or contributions, please:
+---
 
-- Open an issue on [GitHub Issues](https://github.com/torsteinsornes/azure-llm-toolkit/issues)
-- Check existing issues for solutions
-- Provide detailed information about your environment and use case
-
-## Changelog
-
-### 0.1.0 (2024-12-08)
-
-- Initial release
-- Rate limiting with TPM/RPM support
-- Cost tracking and estimation
-- Batch embedding support
-- Chat completions with reasoning models
-- Query rewriting
-- Metadata extraction
-- Token counting utilities
+If you want, I can:
+- Open/produce a one-file example matching your exact environment (async or sync),
+- Or update the examples/ directory to include a minimal runnable script demonstrating embed + chat + caching + cost tracking with your preferred settings.

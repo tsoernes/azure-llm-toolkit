@@ -398,9 +398,13 @@ class CostAnalytics:
 
         # Peak hour analysis
         if breakdown.by_hour:
-            peak_hour = max(breakdown.by_hour, key=breakdown.by_hour.get)
-            peak_cost = breakdown.by_hour[peak_hour]
-            if peak_cost > breakdown.total_cost * 0.3:  # More than 30% in one hour
+            # Determine peak hour safely using dict.items() so the key function and types
+            # are unambiguous for type checkers and runtime.
+            try:
+                peak_hour, peak_cost = max(breakdown.by_hour.items(), key=lambda kv: kv[1])
+            except ValueError:
+                peak_hour, peak_cost = None, 0.0
+            if peak_hour is not None and peak_cost > breakdown.total_cost * 0.3:  # More than 30% in one hour
                 recommendations.append(
                     f"High usage detected during hour {peak_hour}:00. "
                     f"Consider load balancing or batch processing during off-peak hours."

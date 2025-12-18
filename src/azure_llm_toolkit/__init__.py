@@ -51,45 +51,19 @@ Example usage:
 
 from __future__ import annotations
 
-from .batch_embedder import PolarsBatchEmbedder
-from .cache import CacheManager, ChatCache, EmbeddingCache, LLMCache
-from .circuit_breaker import (
-    CircuitBreaker,
-    MultiCircuitBreaker,
-    CircuitBreakerConfig,
-    CircuitBreakerMetrics,
-    CircuitState,
-    CircuitBreakerError,
+from .analytics import (
+    Anomaly,
+    CostAnalytics,
+    CostBreakdown,
+    CostReport,
+    CostTrend,
+    UsageStats,
 )
-from .client import AzureLLMClient
-from .config import AzureConfig, detect_embedding_dimension
-from .cost_tracker import CostEstimator, CostTracker, InMemoryCostTracker
-from .dashboard import (
-    RateLimiterSnapshot,
-    snapshot_rate_limiter,
-    render_rate_limiter_snapshot,
-    render_rate_limiter_pool,
-    render_circuit_breaker,
-    render_multi_circuit_breaker,
-    render_operation_metrics,
-    render_full_dashboard,
-)
-from .metrics import (
-    MetricsCollector,
-    MetricsTracker,
-    OperationMetrics,
-    AggregatedMetrics,
-    PrometheusMetrics,
-    create_collector_with_prometheus,
-    PROMETHEUS_AVAILABLE,
-    OPENTELEMETRY_AVAILABLE,
-)
-from .rate_limiter import RateLimiter, RateLimiterPool, get_rate_limiter_pool
 from .batch import (
-    BatchStatus,
-    BatchError,
     BaseBatchItem,
     BaseBatchResult,
+    BatchError,
+    BatchStatus,
     ChatBatchItem,
     ChatBatchResult,
     ChatBatchRunner,
@@ -97,66 +71,82 @@ from .batch import (
     EmbeddingBatchResult,
     EmbeddingBatchRunner,
 )
-from .streaming import (
-    StreamSink,
-    StreamChunk,
-    FileSink,
-    JSONLSink,
-    QueueSink,
-    CallbackSink,
-    MultiSink,
-    BufferedSink,
-    StreamProcessor,
-    stream_to_file,
-    stream_to_queue,
-    stream_with_callback,
+from .batch_embedder import PolarsBatchEmbedder
+from .cache import CacheManager, ChatCache, EmbeddingCache, LLMCache
+from .circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    CircuitBreakerMetrics,
+    CircuitState,
+    MultiCircuitBreaker,
 )
-from .analytics import (
-    CostAnalytics,
-    CostReport,
-    CostBreakdown,
-    UsageStats,
-    CostTrend,
-    Anomaly,
+from .client import AzureLLMClient
+from .config import AzureConfig, detect_embedding_dimension
+from .conversation import (
+    ConversationConfig,
+    ConversationManager,
+    ConversationMessage,
 )
+from .cost_tracker import CostEstimator, CostTracker, InMemoryCostTracker
+from .dashboard import (
+    RateLimiterSnapshot,
+    render_circuit_breaker,
+    render_full_dashboard,
+    render_multi_circuit_breaker,
+    render_operation_metrics,
+    render_rate_limiter_pool,
+    render_rate_limiter_snapshot,
+    snapshot_rate_limiter,
+)
+from .health import (
+    ComponentHealth,
+    HealthChecker,
+    HealthCheckResult,
+    HealthStatus,
+)
+from .metrics import (
+    OPENTELEMETRY_AVAILABLE,
+    PROMETHEUS_AVAILABLE,
+    AggregatedMetrics,
+    MetricsCollector,
+    MetricsTracker,
+    OperationMetrics,
+    PrometheusMetrics,
+    create_collector_with_prometheus,
+)
+from .rate_limiter import RateLimiter, RateLimiterPool, get_rate_limiter_pool
 from .reranker import (
     LogprobReranker,
     RerankerConfig,
     RerankResult,
     create_reranker,
 )
-from .tools import (
-    ToolChoiceType,
-    ParameterProperty,
-    FunctionDefinition,
-    ToolCall,
-    ToolCallResult,
-    ToolRegistry,
-    tool,
-    get_default_registry,
-    reset_default_registry,
-)
-from .validation import (
-    StructuredOutputError,
-    ValidationRetryExhaustedError,
-    generate_json_schema,
-    create_extraction_prompt,
-    parse_json_response,
-    chat_completion_structured,
-    extract_structured_data,
-    StructuredOutputManager,
+from .streaming import (
+    BufferedSink,
+    CallbackSink,
+    FileSink,
+    JSONLSink,
+    MultiSink,
+    QueueSink,
+    StreamChunk,
+    StreamProcessor,
+    StreamSink,
+    stream_to_file,
+    stream_to_queue,
+    stream_with_callback,
 )
 from .sync_client import AzureLLMClientSync
-from .health import (
-    HealthStatus,
-    ComponentHealth,
-    HealthCheckResult,
-    HealthChecker,
-)
-from .conversation import (
-    ConversationMessage,
-    ConversationConfig,
-    ConversationManager,
+from .tools import (
+    FunctionDefinition,
+    ParameterProperty,
+    ToolCall,
+    ToolCallResult,
+    ToolChoiceType,
+    ToolRegistry,
+    get_default_registry,
+    reset_default_registry,
+    tool,
 )
 from .types import (
     ChatCompletionResult,
@@ -165,8 +155,18 @@ from .types import (
     QueryRewriteResult,
     UsageInfo,
 )
+from .validation import (
+    StructuredOutputError,
+    StructuredOutputManager,
+    ValidationRetryExhaustedError,
+    chat_completion_structured,
+    create_extraction_prompt,
+    extract_structured_data,
+    generate_json_schema,
+    parse_json_response,
+)
 
-__version__ = "0.1.1"
+__version__ = "0.1.5"
 
 __all__ = [
     # Main client

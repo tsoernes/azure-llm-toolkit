@@ -175,9 +175,9 @@ class HealthChecker:
             )
 
         try:
-            # Get stats from rate limiter pool
+            # Get stats from rate limiter pool (access attributes safely)
             pool = self.client.rate_limiter_pool
-            limiters = pool.limiters
+            limiters = getattr(pool, "limiters", None)  # type: ignore[attr-defined]
 
             if not limiters:
                 return ComponentHealth(
@@ -186,15 +186,27 @@ class HealthChecker:
                     message="No active rate limiters",
                 )
 
-            # Check first limiter as representative
-            limiter = next(iter(limiters.values()))
-            stats = limiter.get_stats()
+            # Aggregate utilization stats across all limiters
+            max_rpm = 0.0
+            max_tpm = 0.0
+            total_requests = 0
+            total_tokens = 0
 
-            rpm_util = stats.get("rpm_utilization_pct", 0)
-            tpm_util = stats.get("tpm_utilization_pct", 0)
+            for limiter in limiters.values():
+                try:
+                    stats = limiter.get_stats()
+                except Exception:
+                    # If a particular limiter fails to report, skip it
+                    continue
 
-            # Determine status based on utilization
-            max_util = max(rpm_util, tpm_util)
+                rpm_util = float(stats.get("rpm_utilization_pct", 0.0))
+                tpm_util = float(stats.get("tpm_utilization_pct", 0.0))
+                max_rpm = max(max_rpm, rpm_util)
+                max_tpm = max(max_tpm, tpm_util)
+                total_requests += int(stats.get("total_requests", 0))
+                total_tokens += int(stats.get("total_tokens", 0))
+
+            max_util = max(max_rpm, max_tpm)
 
             if max_util < 70:
                 status = HealthStatus.HEALTHY
@@ -211,13 +223,12 @@ class HealthChecker:
                 status=status,
                 message=message,
                 details={
-                    "rpm_utilization": round(rpm_util, 1),
-                    "tpm_utilization": round(tpm_util, 1),
-                    "total_requests": stats.get("total_requests", 0),
-                    "total_tokens": stats.get("total_tokens", 0),
+                    "rpm_utilization": round(max_rpm, 1),
+                    "tpm_utilization": round(max_tpm, 1),
+                    "total_requests": total_requests,
+                    "total_tokens": total_tokens,
                 },
             )
-
         except Exception as e:
             return ComponentHealth(
                 name="rate_limiter",
@@ -366,12 +377,19 @@ class HealthChecker:
             # Check rate limiter capacity
             if self.client.enable_rate_limiting and self.client.rate_limiter_pool:
                 pool = self.client.rate_limiter_pool
-                limiters = pool.limiters
+                # Access the pool's internal limiter mapping safely; attribute names may differ
+                # across implementations and static checkers may not know about them.
+                limiters = getattr(pool, "_limiters", None)  # type: ignore[attr-defined]
 
                 if limiters:
                     # Check if any limiter is overloaded
                     for limiter in limiters.values():
-                        stats = limiter.get_stats()
+                        try:
+                            stats = limiter.get_stats()
+                        except Exception:
+                            # If a limiter fails to report stats, skip it
+                            continue
+
                         rpm_util = stats.get("rpm_utilization_pct", 0)
                         tpm_util = stats.get("tpm_utilization_pct", 0)
 

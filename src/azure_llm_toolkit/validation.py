@@ -411,11 +411,14 @@ class StructuredOutputManager:
 
         # Handle exceptions
         validated_results: list[T] = []
+        from typing import cast
+
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.error(f"Failed to extract from text {i}: {result}")
                 raise result
-            validated_results.append(result)
+            # Cast the result to the expected response_model type for the benefit of static type checkers.
+            validated_results.append(cast(T, result))
 
         return validated_results
 

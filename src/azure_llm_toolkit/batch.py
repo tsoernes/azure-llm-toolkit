@@ -387,7 +387,7 @@ class EmbeddingBatchRunner:
                 model_overrides = {item.model for item in batch_items if item.model}
                 model = model_overrides.pop() if len(model_overrides) == 1 else None
 
-                result: EmbeddingResult = await self.client.embed_texts(
+                result: EmbeddingResult = await getattr(self.client, "embed_texts")(
                     texts=texts,
                     model=model,
                     batch_size=len(texts),  # Already batched here

@@ -140,6 +140,95 @@ class PolarsBatchEmbedder:
 
         return averaged_results
 
+    # ----------------------------
+    # Backward-compatible helpers
+    # ----------------------------
+    def _tokenize_dataframe(self, df: pl.DataFrame, text_column: str, verbose: bool = True) -> pl.DataFrame:
+        """
+        Tokenize a DataFrame column and add two columns:
+        - {text_column}.tokens: list[int] or None for null texts
+        - {text_column}.token_count: int token counts (0 for null)
+
+        If the columns already exist, this is a no-op for that column.
+        """
+        tokens_col = f"{text_column}.tokens"
+        token_count_col = f"{text_column}.token_count"
+
+        # If tokens already present, return unchanged
+        if tokens_col in df.columns and token_count_col in df.columns:
+            return df
+
+        texts = df[text_column].to_list()
+        token_lists: list[list[int] | None] = []
+        token_counts: list[int] = []
+
+        # Use encoder.encode_batch when available for speed; fall back gracefully
+        try:
+            # Some tiktoken encoders support encode_batch with num_threads
+            token_lists_all = self.encoder.encode_batch(
+                [t if t is not None else "" for t in texts], num_threads=multiprocessing.cpu_count()
+            )
+            for original_text, tl in zip(texts, token_lists_all):
+                if original_text is None:
+                    token_lists.append(None)
+                    token_counts.append(0)
+                else:
+                    token_lists.append(list(tl))
+                    token_counts.append(len(tl))
+        except Exception:
+            # Fallback: encode individually
+            for t in texts:
+                if t is None:
+                    token_lists.append(None)
+                    token_counts.append(0)
+                else:
+                    try:
+                        tl = self.encoder.encode(t)
+                        token_lists.append(list(tl))
+                        token_counts.append(len(tl))
+                    except Exception:
+                        # Last resort: estimate tokens using config.count_tokens
+                        est = self.config.count_tokens(t)
+                        token_lists.append(None)
+                        token_counts.append(est)
+
+        # Attach columns (Polars can accept Python lists)
+        out_cols = []
+        if tokens_col not in df.columns:
+            out_cols.append(pl.Series(tokens_col, token_lists))
+        if token_count_col not in df.columns:
+            out_cols.append(pl.Series(token_count_col, token_counts))
+
+        if out_cols:
+            df = df.with_columns(out_cols)
+
+        if verbose:
+            logger.debug(f"Tokenized {len(texts)} rows (column={text_column})")
+
+        return df
+
+    def _create_batches(self, df: pl.DataFrame, token_count_column: str) -> pl.DataFrame:
+        """
+        Create a simple batch id column for the DataFrame.
+
+        The strategy here is intentionally simple and deterministic:
+        - Assign sequential batch ids grouping up to self.max_lists_per_query items each.
+        - This helper exists to support tests and basic batching inspection.
+
+        Returns DataFrame with additional column `batch_id`.
+        """
+        batch_col = "batch_id"
+        if batch_col in df.columns:
+            return df
+
+        n = len(df)
+        # Avoid zero division
+        group_size = max(1, int(self.max_lists_per_query))
+        batch_ids = [i // group_size for i in range(n)]
+
+        df = df.with_columns(pl.Series(batch_col, batch_ids))
+        return df
+
     @retry(
         reraise=True,
         stop=stop_after_attempt(5),
@@ -334,9 +423,15 @@ class PolarsBatchEmbedder:
         """
         embedding_column = f"{text_column}.embedding"
         token_count_column = f"{text_column}.token_count"
+        tokens_col = f"{text_column}.tokens"
+
+        # Record original presence of columns so we can preserve external schema
+        had_embedding_col_original = embedding_column in df.columns
+        had_tokens_col_original = tokens_col in df.columns
+        had_token_count_col_original = token_count_column in df.columns
 
         # Initialize embedding column if it doesn't exist
-        if embedding_column not in df.columns:
+        if not had_embedding_col_original:
             df = df.with_columns(pl.lit(None).alias(embedding_column))
 
         # Filter out rows to embed
@@ -348,6 +443,9 @@ class PolarsBatchEmbedder:
         if len(df_to_embed) == 0:
             logger.info("No texts to embed (all already embedded)")
             return df
+
+        # Ensure tokenization columns exist (backward-compatible)
+        df_to_embed = self._tokenize_dataframe(df_to_embed, text_column=text_column, verbose=verbose)
 
         # Extract texts to embed
         texts_to_embed = df_to_embed[text_column].to_list()
@@ -365,25 +463,34 @@ class PolarsBatchEmbedder:
                 f"Estimated cost: {metadata['estimated_cost']:.4f} {metadata['currency']}"
             )
 
-        # Add embeddings and token counts to DataFrame
+        # Add embeddings to DataFrame
         embedding_length = len(embeddings[0])
-
-        # Tokenize to get token counts (reuse from embed_texts processing)
-        token_counts = [self.config.count_tokens(text) for text in texts_to_embed]
 
         df_to_embed = df_to_embed.with_columns(
             [
                 pl.Series(embedding_column, embeddings, dtype=pl.Array(pl.Float64, embedding_length)),
-                pl.Series(token_count_column, token_counts),
             ]
         )
 
+        # Ensure token_count column exists; if not, compute conservative counts
+        if token_count_column not in df_to_embed.columns:
+            token_counts = [self.config.count_tokens(text) for text in texts_to_embed]
+            df_to_embed = df_to_embed.with_columns([pl.Series(token_count_column, token_counts)])
+
         # Merge back with original DataFrame (for rows that weren't embedded)
+        # Preserve the original schema when appropriate (e.g. when input already had an embedding column).
+        tokens_col = f"{text_column}.tokens"
+        token_count_col = f"{text_column}.token_count"
+        # Use the original presence flags recorded earlier (before we possibly added default columns)
+        had_embedding_col = had_embedding_col_original
+        had_tokens_col = had_tokens_col_original
+        had_token_count_col = had_token_count_col_original
+
         if not re_embed and len(df) > len(df_to_embed):
-            # Get rows that weren't embedded
+            # Get rows that weren't embedded (either had embeddings already or null texts)
             df_not_embedded = df.filter(pl.col(text_column).is_null() | pl.col(embedding_column).is_not_null())
 
-            # Add missing columns to df_not_embedded
+            # Add missing columns to df_not_embedded so concat doesn't fail
             for col in df_to_embed.columns:
                 if col not in df_not_embedded.columns:
                     if col == embedding_column:
@@ -397,6 +504,17 @@ class PolarsBatchEmbedder:
             result_df = pl.concat([df_to_embed, df_not_embedded])
         else:
             result_df = df_to_embed
+
+        # If the incoming DataFrame already had an embedding column (common in incremental flows),
+        # avoid introducing new token columns that would change the external schema. Only keep
+        # token-related columns if they were present in the original input.
+        if had_embedding_col:
+            # Remove tokens column if it didn't exist originally
+            if not had_tokens_col and tokens_col in result_df.columns:
+                result_df = result_df.drop(tokens_col)
+            # Remove token_count column if it didn't exist originally
+            if not had_token_count_col and token_count_col in result_df.columns:
+                result_df = result_df.drop(token_count_col)
 
         return result_df
 

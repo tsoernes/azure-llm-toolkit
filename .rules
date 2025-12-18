@@ -1,0 +1,180 @@
+# Repository Summary
+
+## Executive Overview
+
+## Executive overview
+
+This repository is organized as a Python project using a **`src/` layout**, with the primary library code housed in `src/azure_llm_toolkit`. Based on the package name and surrounding structure, it appears intended to provide a reusable toolkit for working with Azure-hosted LLM capabilities, accompanied by practical collateral (examples, notebooks), quality gates (tests, CI workflows), and performance measurement (benchmarks).
+
+### High-level architecture
+- **Core library**: `src/azure_llm_toolkit` is the main distributable package; it likely contains the public API surface, implementation modules, and internal utilities.
+- **Validation**: `tests/` and `tests/integration/` suggest a split between fast/local tests and environment-dependent integration checks.
+- **Enablement**: `examples/` and `notebooks/` provide runnable demonstrations and exploratory workflows.
+- **Performance**: `benchmarks/` indicates a place to track and compare runtime/performance characteristics over time.
+- **Documentation & automation**: `docs/` supports user/developer documentation, while `.github/workflows/` provides CI/CD automation (e.g., test runs, linting, packaging).
+
+### Key structural patterns
+- **Separation of concerns by top-level directories** (library vs. tests vs. docs vs. examples).
+- **`src/`-based packaging** (helps prevent accidentally importing from the working directory during development).
+- **Dedicated integration test area** (suggests some tests require external services/credentials or live Azure resources).
+
+## Directory & File Hierarchy for key files
+
+## .
+
+Repository root containing the main top-level subsystems: source code (`src/`), tests (`tests/`), documentation (`docs/`), examples and notebooks, benchmarks, and GitHub automation configuration.
+
+**Files:**
+
+- `.gitignore` : (no summary)
+- `.python-version` : (no summary)
+- `.rules` : (no summary)
+- `CONTRIBUTING.md` : (no summary)
+- `LICENSE` : (no summary)
+- `README.md` : (no summary)
+- `pyproject.toml` : (no summary)
+- `show_metrics.py` : (no summary)
+
+### .github
+
+GitHub configuration directory. Includes workflow automation under `workflows/` and may also host issue templates, PR templates, or other repository metadata.
+
+#### .github/workflows
+**Files:**
+
+- `.github/workflows/publish.yml` : (no summary)
+
+### benchmarks
+**Files:**
+
+- `benchmarks/benchmark_runners.py` : (no summary)
+
+### docs
+
+Project documentation sources (e.g., user guides, API references, contribution notes). Usually paired with a documentation build toolchain.
+
+**Files:**
+
+- `docs/FEATURES_AND_IMPROVEMENTS.md` : (no summary)
+- `docs/IMPLEMENTATION_STATUS.md` : (no summary)
+- `docs/LIVE_METRICS_SUMMARY.md` : (no summary)
+- `docs/MIGRATION_GUIDE.md` : (no summary)
+- `docs/PROJECT_SUMMARY.md` : (no summary)
+- `docs/RERANKER_IMPLEMENTATION.md` : (no summary)
+
+### examples
+
+Contains runnable example programs or scripts demonstrating how to use the library. This is typically aimed at helping users get started and showcasing common usage patterns.
+
+**Files:**
+
+- `examples/basic_usage.py` : (no summary)
+- `examples/batch_embedding_example.py` : (no summary)
+- `examples/caching_example.py` : (no summary)
+- `examples/function_calling_example.py` : (no summary)
+- `examples/otel_jaeger_demo.py` : (no summary)
+- `examples/prometheus_dashboard_example.py` : (no summary)
+- `examples/prometheus_demo_simple.py` : (no summary)
+- `examples/prometheus_live_demo.py` : (no summary)
+- `examples/reranker_demo_simple.py` : (no summary)
+- `examples/reranker_example.py` : (no summary)
+- `examples/reranker_rate_limiting_example.py` : (no summary)
+- `examples/sync_client_example.py` : (no summary)
+
+### notebooks
+
+Jupyter notebooks for interactive exploration, tutorials, or experiments. Typically used for prototyping and demonstrating end-to-end workflows.
+
+**Files:**
+
+- `notebooks/01_getting_started.ipynb` : (no summary)
+- `notebooks/02_rate_limiting_strategies.ipynb` : (no summary)
+- `notebooks/03_cost_optimization.ipynb` : (no summary)
+- `notebooks/04_rag_implementation.ipynb` : (no summary)
+- `notebooks/05_agent_patterns.ipynb` : (no summary)
+- `notebooks/06_production_deployment.ipynb` : (no summary)
+
+### src
+
+Source root following the `src/` layout for Python packaging. Keeps library code isolated from project tooling and tests to avoid import-path pitfalls.
+
+#### src/azure_llm_toolkit
+
+Primary Python package for the repository. This directory is expected to contain the toolkit’s implementation and public APIs.
+
+**Files:**
+
+- `src/azure_llm_toolkit/__init__.py` : (no summary)
+- `src/azure_llm_toolkit/analytics.py` : (no summary)
+- `src/azure_llm_toolkit/batch.py` : (no summary)
+- `src/azure_llm_toolkit/batch_embedder.py` : (no summary)
+- `src/azure_llm_toolkit/cache.py` : (no summary)
+- `src/azure_llm_toolkit/circuit_breaker.py` : (no summary)
+- `src/azure_llm_toolkit/client.py` : (no summary)
+- `src/azure_llm_toolkit/client.py.bak` : (no summary)
+- `src/azure_llm_toolkit/config.py` : (no summary)
+- `src/azure_llm_toolkit/conversation.py` : (no summary)
+- `src/azure_llm_toolkit/cost_tracker.py` : (no summary)
+- `src/azure_llm_toolkit/dashboard.py` : (no summary)
+- `src/azure_llm_toolkit/health.py` : (no summary)
+- `src/azure_llm_toolkit/metrics.py` : (no summary)
+- `src/azure_llm_toolkit/opentelemetry_integration.py` : (no summary)
+- `src/azure_llm_toolkit/rate_limiter.py` : (no summary)
+- `src/azure_llm_toolkit/reranker.py` : (no summary)
+- `src/azure_llm_toolkit/streaming.py` : (no summary)
+- `src/azure_llm_toolkit/sync_client.py` : (no summary)
+- `src/azure_llm_toolkit/tools.py` : (no summary)
+- `src/azure_llm_toolkit/types.py` : (no summary)
+- `src/azure_llm_toolkit/validation.py` : (no summary)
+
+### tests
+
+Test suite root for the project. The presence of an `integration/` subdirectory suggests a structure that separates quick-running tests from environment-dependent integration tests.
+
+**Files:**
+
+- `tests/__init__.py` : (no summary)
+- `tests/conftest.py` : (no summary)
+- `tests/manual_test_max_tokens_vs_max_completion.py` : (no summary)
+- `tests/test_batch_embedder.py` : (no summary)
+- `tests/test_batch_runner.py` : (no summary)
+- `tests/test_cache.py` : (no summary)
+- `tests/test_client.py` : (no summary)
+- `tests/test_live_rate_limits.py` : (no summary)
+- `tests/test_max_tokens_vs_max_completion.py` : (no summary)
+- `tests/test_rate_limiter_integration.py` : (no summary)
+- `tests/test_reranker.py` : (no summary)
+- `tests/test_reranker_rate_limit_stress.py` : (no summary)
+- `tests/test_validation.py` : (no summary)
+
+#### tests/integration
+**Files:**
+
+- `tests/integration/test_end_to_end.py` : (no summary)
+
+
+## Summary Statistics
+
+- Total files in repository: 71
+- Total textual files scanned: 70
+- Files included after budget/filter: 70
+- Strategy (comprehension level): comprehensive
+- Batches executed: 1
+- Avg estimated tokens per batch: 152_969
+- Model (generation): gpt-5.2
+- Token budget (input): 400_000
+- Summary token count: 1_824
+
+## Summary Cost Analysis
+
+- Total tokens processed: 1,591
+  - Input tokens (sent to API): 427
+  - API cached tokens (prompt cache): 0
+  - Output tokens: 1,164
+  - Local cached tokens (files not sent): 0
+- Local cache: 0 files skipped
+- Actual cost (with all caching): kr0.125
+- Cost without any cache: kr0.125
+- Total savings: kr0.0000
+  - API cache savings: kr0.0000
+  - Local cache savings: kr0.0000
