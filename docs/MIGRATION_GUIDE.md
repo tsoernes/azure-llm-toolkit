@@ -195,20 +195,9 @@ token_count = client.count_tokens(text)
 token_count = config.count_tokens(text)
 ```
 
-### 9. Update Query Rewriting
-
-**Before:**
-```python
-rewrite_result = await clients.rewrite_query(query)
-rewritten_query = rewrite_result.rewritten
-```
-
-**After:**
-```python
-result = await client.rewrite_query(query)
-rewritten_query = result.rewritten
-original_query = result.original
-```
+<!-- Query rewriting has been removed from the public API in this release.
+If you previously relied on `rewrite_query`, please migrate your flow to
+use your own rewriting logic or a separate service. -->
 
 ### 10. Update Metadata Extraction
 
@@ -237,7 +226,6 @@ metadata = await client.extract_metadata_from_filename(
 | `estimate_embedding_cost_kr()` | `estimate_embedding_cost()` |
 | `count_message_tokens()` | `count_message_tokens()` |
 | `_token_len()` | `count_tokens()` |
-| `rewrite_query()` | `rewrite_query()` (returns `QueryRewriteResult`) |
 | `extract_filename_metadata_with_usage()` | `extract_metadata_from_filename()` |
 | `extract_content_metadata_with_usage()` | `extract_metadata_from_content()` |
 
