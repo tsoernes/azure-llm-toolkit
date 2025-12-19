@@ -132,23 +132,10 @@ async def example_rate_limiting():
             print(f"  Total wait time: {model_stats['total_wait_time_seconds']:.2f}s")
 
 
-async def example_query_rewriting():
-    """Example: Rewrite queries for better retrieval."""
-    print("\n=== Query Rewriting Example ===")
-
-    config = AzureConfig()
-    client = AzureLLMClient(config=config)
-
-    queries = [
-        "how to train ml model",
-        "python async await",
-        "best practices docker",
-    ]
-
-    for query in queries:
-        result = await client.rewrite_query(query)
-        print(f"\nOriginal: {result.original}")
-        print(f"Rewritten: {result.rewritten}")
+# Query rewriting example removed (function intentionally deleted).
+# If you previously relied on query rewriting, implement your own
+# rewriting logic or use an external service; this project no longer
+# provides a built-in `rewrite_query` API.
 
 
 async def example_metadata_extraction():
@@ -258,7 +245,7 @@ async def main():
         await example_chat_completion()
         await example_cost_tracking()
         await example_rate_limiting()
-        await example_query_rewriting()
+        # example_query_rewriting() removed — query rewriting no longer provided by this toolkit
         await example_metadata_extraction()
         await example_rag_answer()
         await example_token_counting()

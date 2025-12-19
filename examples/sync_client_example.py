@@ -236,26 +236,10 @@ def multi_turn_conversation():
     print(f"Assistant: {response_3.content}")
 
 
-def query_rewriting():
-    """Query rewriting example."""
-    print("\n" + "=" * 80)
-    print("Query Rewriting Example")
-    print("=" * 80)
-
-    load_dotenv()
-
-    config = AzureConfig()
-    client = AzureLLMClientSync(config=config)
-
-    # Original query
-    original_query = "how to fix computer slow"
-
-    print(f"\nOriginal query: {original_query}")
-
-    # Rewrite for better retrieval
-    result = client.rewrite_query(original_query)
-
-    print(f"Rewritten query: {result.rewritten}")
+# Query rewriting example removed.
+# This project no longer provides a built-in `rewrite_query` API.
+# If you previously relied on query rewriting, implement your own rewriting
+# logic or use an external service integrated into your retrieval pipeline.
 
 
 def legacy_framework_integration():
@@ -329,7 +313,6 @@ def main():
         ("Token Counting", token_counting),
         ("Batch Embeddings", batch_embeddings),
         ("Multi-Turn Conversation", multi_turn_conversation),
-        ("Query Rewriting", query_rewriting),
         ("Legacy Framework Integration", legacy_framework_integration),
     ]
 
