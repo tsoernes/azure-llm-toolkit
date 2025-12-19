@@ -288,6 +288,90 @@ class PolarsBatchEmbedder:
 
         return embeddings
 
+    async def _embed_via_batch_api(self, token_lists: list[list[int]]) -> list[npt.NDArray[np.float64]]:
+        """
+        Attempt to embed token lists using a Batch API if a batch_api_client is configured.
+        Falls back to the regular per-request embedding implementation if the batch client
+        is not available or the batch job fails.
+
+        This is an opt-in path; set `use_batch_api=True` and provide `batch_api_client`
+        when constructing the PolarsBatchEmbedder to enable it.
+
+        The function assumes a minimal, generic async batch client interface:
+          - create(model=..., inputs=...) -> returns a job descriptor with `id`
+          - get_status(job_id) -> returns an object with `.state` in {'pending','running','succeeded','failed'}
+          - get_result(job_id) -> returns a result object with `.data` containing embeddings similar to the per-call API
+
+        The implementation is best-effort and intentionally defensive because concrete batch APIs
+        and SDKs differ; the method will log and fall back to per-call embedding on any unexpected errors.
+        """
+        # If no batch client configured, fall back immediately
+        batch_client = getattr(self, "batch_api_client", None)
+        if not batch_client:
+            return await self._embed_token_lists(token_lists)
+
+        try:
+            # Create job (best-effort call signature)
+            create_kwargs = {
+                "model": self.config.embedding_deployment,
+                "inputs": token_lists,
+            }
+            job = await batch_client.create(**create_kwargs)  # type: ignore[attr-defined]
+
+            job_id = getattr(job, "id", None) or getattr(job, "job_id", None)
+            if not job_id:
+                # Unknown job id shape; fallback
+                logger.debug("Batch API returned job without id; falling back to per-call embed")
+                return await self._embed_token_lists(token_lists)
+
+            # Poll for completion with exponential backoff up to a reasonable timeout
+            import asyncio as _asyncio
+
+            start = datetime.now()
+            timeout_seconds = 60 * 15  # 15 minutes default timeout for batch jobs
+            poll_interval = 2.0
+
+            while True:
+                status = await batch_client.get_status(job_id)  # type: ignore[attr-defined]
+                state = (
+                    getattr(status, "state", None) or status.get("state", None) if isinstance(status, dict) else None
+                )
+
+                if state in ("succeeded", "finished", "completed"):
+                    result = await batch_client.get_result(job_id)  # type: ignore[attr-defined]
+                    # Expect result.data similar to response.data where each item has .embedding
+                    data_items = (
+                        getattr(result, "data", None) or result.get("data", None) if isinstance(result, dict) else None
+                    )
+                    if not data_items:
+                        raise RuntimeError("Batch job completed but no data returned")
+                    embeddings = []
+                    for item in data_items:
+                        emb = (
+                            getattr(item, "embedding", None) or item.get("embedding", None)
+                            if isinstance(item, dict)
+                            else None
+                        )
+                        if emb is None:
+                            raise RuntimeError("Batch result item missing embedding")
+                        embeddings.append(np.array(emb, dtype=np.float64))
+                    return embeddings
+
+                if state in ("failed", "error"):
+                    raise RuntimeError(f"Batch job {job_id} failed (state={state})")
+
+                elapsed = (datetime.now() - start).total_seconds()
+                if elapsed > timeout_seconds:
+                    raise TimeoutError(f"Batch job {job_id} did not complete within timeout ({timeout_seconds}s)")
+
+                await _asyncio.sleep(poll_interval)
+                # increase interval up to a cap
+                poll_interval = min(poll_interval * 1.5, 30.0)
+
+        except Exception as e:
+            logger.warning(f"Batch API embedding path failed: {e}; falling back to per-call embeddings")
+            return await self._embed_token_lists(token_lists)
+
     async def embed_texts(
         self,
         texts: list[str],
@@ -387,7 +471,16 @@ class PolarsBatchEmbedder:
                         # If the external limiter fails, continue without raising to avoid blocking embedding
                         logger.debug("Batch embedder: rate_limiter.acquire failed or not available; continuing")
 
-                batch_embeddings = await self._embed_token_lists(batch)
+                # Use batch API path if requested, otherwise fall back to token-list embedding.
+                # The batch API is optional and may be provided via `batch_api_client`.
+                if getattr(self, "use_batch_api", False) and getattr(self, "batch_api_client", None):
+                    try:
+                        batch_embeddings = await self._embed_via_batch_api(batch)
+                    except Exception as e:
+                        logger.warning(f"Batch API path failed ({e}); falling back to per-call embedding")
+                        batch_embeddings = await self._embed_token_lists(batch)
+                else:
+                    batch_embeddings = await self._embed_token_lists(batch)
                 all_embeddings.extend(batch_embeddings)
 
                 # Sleep between batches to respect local sleep/backoff settings (except last batch)
