@@ -20,7 +20,6 @@ The following functionality was extracted from `rag-mcp` into this standalone li
 - Async Azure OpenAI client wrapper
 - Batch embedding support with automatic splitting
 - Chat completions with reasoning model support (GPT-4o, o1, etc.)
-- Query rewriting for improved retrieval
 - Metadata extraction from filenames and content
 - Token counting and cost estimation
 - RAG-style question answering
@@ -55,8 +54,6 @@ The following functionality was extracted from `rag-mcp` into this standalone li
 - `CostInfo`: Cost information
 - `ChatCompletionResult`: Chat completion response with metadata
 - `EmbeddingResult`: Embedding response with metadata
-- `QueryRewriteResult`: Query rewriting result
-
 ### 6. **Retry Logic**
 - Exponential backoff for transient failures
 - Automatic retry for rate limits, timeouts, and connection errors
