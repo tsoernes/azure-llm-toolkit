@@ -137,6 +137,10 @@ asyncio.run(stream_example())
 
 When embedding large corpora, use `PolarsBatchEmbedder` which tokenizes in parallel, batches intelligently, and supports weighted averaging for splits.
 
+The batch embedder uses a **dual rate-limiting approach**:
+- Built-in batching with sleep delays between batches (always active)
+- Optional integration with `RateLimiter` for coordinated throttling (set `use_rate_limiting=True`)
+
 Example (async):
 
 ```/dev/null/example.md#L1-200
@@ -151,11 +155,13 @@ async def main():
     df = pl.DataFrame({"id": list(range(1000)), "text": [f"Document {i}" for i in range(1000)]})
     result_df = await embedder.embed_dataframe(df, text_column="text", verbose=True)
 
-    # result_df includes columns: text, text.tokens (token ids), text.token_count, text.embedding
+    # result_df includes columns: text, text.token_count, text.embedding
     print("Embedded rows:", len(result_df))
 
 asyncio.run(main())
 ```
+
+For more examples including rate limiter integration, cost tracking, and handling large datasets, see `examples/polars_batch_embedder_comprehensive.py`.
 
 ---
 ## Caching
