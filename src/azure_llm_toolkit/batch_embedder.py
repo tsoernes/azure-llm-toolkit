@@ -318,9 +318,15 @@ class PolarsBatchEmbedder:
             }
             job = await batch_client.create(**create_kwargs)  # type: ignore[attr-defined]
 
+            # Job descriptor may be an object with attributes or a dict; accept both shapes.
+            job_id = None
+            # Attribute-style access (object with .id or .job_id)
             job_id = getattr(job, "id", None) or getattr(job, "job_id", None)
+            # Dict-style access (mapping with 'id' or 'job_id')
+            if job_id is None and isinstance(job, dict):
+                job_id = job.get("id") or job.get("job_id")
             if not job_id:
-                # Unknown job id shape; fallback
+                # Unknown job id shape; fallback to per-call embedding
                 logger.debug("Batch API returned job without id; falling back to per-call embed")
                 return await self._embed_token_lists(token_lists)
 
