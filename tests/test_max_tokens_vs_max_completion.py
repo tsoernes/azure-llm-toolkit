@@ -78,7 +78,7 @@ class AzureEnvConfig:
             endpoint=env("AZURE_ENDPOINT") or env("AZURE_OPENAI_ENDPOINT"),
             api_key=env("AZURE_OPENAI_API_KEY") or env("OPENAI_API_KEY"),
             api_version=env("AZURE_API_VERSION") or env("AZURE_OPENAI_API_VERSION"),
-            deployment_gpt4o=env("AZURE_RERANKER_DEPLOYMENT", "gpt-4o-east-US"),
+            deployment_gpt4o=env("AZURE_RERANKER_DEPLOYMENT") or "gpt-4o-east-US",
             deployment_gpt5mini=env("AZURE_CHAT_DEPLOYMENT") or env("AZURE_OPENAI_DEPLOYMENT_GPT5MINI"),
         )
 
