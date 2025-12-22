@@ -82,11 +82,7 @@ class AzureEnvConfig:
             deployment_gpt5mini=env("AZURE_CHAT_DEPLOYMENT") or env("AZURE_OPENAI_DEPLOYMENT_GPT5MINI"),
         )
 
-        if missing:
-            pytest.skip(
-                "Skipping max_tokens vs max_completion_tokens tests; missing env vars: "
-                + ", ".join(sorted(set(missing)))
-            )
+        # skip guard removed: always load config defaults to run tests
 
         if not cfg.endpoint.startswith("https://"):
             pytest.skip(f"Invalid AZURE endpoint: {cfg.endpoint!r}")

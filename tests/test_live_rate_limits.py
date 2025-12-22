@@ -57,15 +57,13 @@ import os
 import time
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import pytest
 
 from azure_llm_toolkit import AzureConfig, AzureLLMClient, InMemoryCostTracker, RateLimiterPool
-
-
-def _is_live_enabled() -> bool:
-    """Check if live tests should run."""
-    val = os.getenv("RUN_LIVE_RATE_LIMIT_TESTS", "").strip().lower()
-    return val in {"1", "true", "yes", "on"}
 
 
 def _require_env_vars(names: list[str]) -> bool:
@@ -125,11 +123,10 @@ async def live_client(live_config: AzureConfig) -> AzureLLMClient:
 
 
 @pytest.mark.skipif(
-    not _is_live_enabled(),
-    reason="RUN_LIVE_RATE_LIMIT_TESTS is not set; skipping live rate limit tests.",
-)
-@pytest.mark.skipif(
-    not _require_env_vars(["AZURE_OPENAI_API_KEY", "AZURE_ENDPOINT"]),
+    not (
+        _require_env_vars(["AZURE_OPENAI_API_KEY", "AZURE_ENDPOINT"])
+        or _require_env_vars(["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"])
+    ),
     reason="Azure credentials not configured; skipping live rate limit tests.",
 )
 @pytest.mark.asyncio
@@ -153,8 +150,8 @@ async def test_live_embedding_rate_limit(live_client: AzureLLMClient, live_confi
     text = "Azure OpenAI provides access to powerful language models. " * 64  # repeated to get a few hundred tokens
 
     # Parameters for the test (more aggressive traffic)
-    num_tasks = 128
-    iterations_per_task = 20  # total ~2560 embedding calls
+    num_tasks = int(os.getenv("LIVE_RATE_LIMIT_TASKS", "128"))
+    iterations_per_task = int(os.getenv("LIVE_RATE_LIMIT_ITERATIONS", "20"))
 
     async def worker(idx: int) -> None:
         for j in range(iterations_per_task):
@@ -208,10 +205,6 @@ async def test_live_embedding_rate_limit(live_client: AzureLLMClient, live_confi
     # recording usage and cost.
 
 
-@pytest.mark.skipif(
-    not _is_live_enabled(),
-    reason="RUN_LIVE_RATE_LIMIT_TESTS is not set; skipping live rate limit tests.",
-)
 @pytest.mark.skipif(
     not _require_env_vars(["AZURE_OPENAI_API_KEY", "AZURE_ENDPOINT"]),
     reason="Azure credentials not configured; skipping live rate limit tests.",
