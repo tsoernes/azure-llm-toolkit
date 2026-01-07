@@ -73,16 +73,16 @@ class CostEstimator:
             "cached_input": 12.38,
         }
 
-        # GPT-5 models (future-proofing with estimated pricing)
+        # GPT-5 models (Global pricing, NOK per 1M tokens)
         self._pricing["gpt-5"] = {
-            "input": 41.25,
-            "output": 165.00,
-            "cached_input": 20.63,
+            "input": 12.55,
+            "output": 100.37,
+            "cached_input": 1.26,
         }
         self._pricing["gpt-5-mini"] = {
-            "input": 8.25,
-            "output": 33.00,
-            "cached_input": 4.13,
+            "input": 2.51,
+            "output": 20.08,
+            "cached_input": 0.26,
         }
 
         # Embedding models (per 1M tokens)
@@ -312,8 +312,8 @@ class InMemoryCostTracker:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record a cost entry."""
-        from datetime import datetime, timezone
         import json
+        from datetime import datetime, timezone
         from pathlib import Path
 
         entry = {
