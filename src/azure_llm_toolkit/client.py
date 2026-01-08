@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import numpy as np
@@ -42,15 +43,24 @@ def _hash_payload(data: Any) -> str:
 
 
 def _log_retry_attempt(retry_state):
-    """Custom callback to log retry attempts with payload hash."""
+    """Custom callback to log retry attempts with payload hash and timeout info."""
     exception = retry_state.outcome.exception()
     attempt = retry_state.attempt_number
     wait_time = retry_state.next_action.sleep if retry_state.next_action else 0
 
-    # Try to extract payload from args/kwargs
+    # Try to extract payload and client config from args/kwargs
     args = retry_state.args
     kwargs = retry_state.kwargs
     payload_hash = "unknown"
+    timeout_info = ""
+
+    # Extract timeout from self (first arg should be the AzureLLMClient instance)
+    if args and len(args) > 0 and hasattr(args[0], "config"):
+        timeout_seconds = args[0].config.timeout_seconds
+        if timeout_seconds is None:
+            timeout_info = ", api_timeout=infinite"
+        else:
+            timeout_info = f", api_timeout={timeout_seconds}s"
 
     # For embeddings: first arg is batch
     if args and len(args) > 1 and isinstance(args[1], (list, tuple)):
@@ -61,7 +71,7 @@ def _log_retry_attempt(retry_state):
 
     logger.warning(
         f"Retry attempt {attempt} after {exception.__class__.__name__}: {exception} "
-        f"(payload_hash={payload_hash}, wait={wait_time:.1f}s)"
+        f"(payload_hash={payload_hash}, retry_backoff_delay={wait_time:.1f}s{timeout_info})"
     )
 
 
@@ -112,6 +122,15 @@ class AzureLLMClient:
         self.enable_rate_limiting = enable_rate_limiting
         self.enable_cache = enable_cache
         self.metrics_collector = metrics_collector
+
+        # Log timeout configuration
+        timeout_str = "infinite" if self.config.timeout_seconds is None else f"{self.config.timeout_seconds}s"
+        logger.debug(
+            f"Initialized AzureLLMClient (api_timeout={timeout_str}, "
+            f"max_retries={self.config.max_retries}, "
+            f"rate_limiting={enable_rate_limiting}, "
+            f"caching={enable_cache})"
+        )
 
         if enable_rate_limiting:
             self.rate_limiter_pool = rate_limiter_pool or RateLimiterPool()
@@ -207,14 +226,30 @@ class AzureLLMClient:
             limiter = await self.rate_limiter_pool.get_limiter(model)
             await limiter.acquire(tokens=tokens)
 
-        response = await self.client.embeddings.create(model=model, input=[text])
-        logger.debug(
-            "embed_text received response",
-            extra={
-                "model": model,
-                "usage": getattr(response, "usage", None),
-            },
-        )
+        try:
+            start_time = time.time()
+            response = await self.client.embeddings.create(model=model, input=[text])
+            elapsed = time.time() - start_time
+
+            logger.debug(
+                "embed_text received response",
+                extra={
+                    "model": model,
+                    "usage": getattr(response, "usage", None),
+                    "elapsed_seconds": f"{elapsed:.2f}",
+                },
+            )
+
+            # Warn if request took unusually long
+            if elapsed > 10.0:
+                logger.info(f"Embedding request took {elapsed:.2f}s (model={model})")
+        except APITimeoutError as e:
+            timeout_str = "infinite" if self.config.timeout_seconds is None else f"{self.config.timeout_seconds}s"
+            logger.error(
+                f"API timeout on embedding request, configured timeout={timeout_str}, model={model}. "
+                f"Consider increasing AZURE_TIMEOUT_SECONDS if needed. Error: {e}"
+            )
+            raise
 
         embedding = response.data[0].embedding
 
@@ -402,7 +437,20 @@ class AzureLLMClient:
 
         for attempt in range(1, max_attempts + 1):
             try:
+                start_time = time.time()
                 response = await self.client.chat.completions.create(**kwargs)
+                elapsed = time.time() - start_time
+
+                # Log timing info
+                logger.debug(f"Chat completion completed in {elapsed:.2f}s (model={model})")
+
+                # Warn if request took unusually long (>30s for reasoning models, >10s for others)
+                threshold = 30.0 if any(x in model.lower() for x in ["o1", "gpt-5"]) else 10.0
+                if elapsed > threshold:
+                    logger.info(
+                        f"Chat completion took {elapsed:.2f}s (model={model}, "
+                        f"threshold={threshold}s). This is normal for reasoning models."
+                    )
 
                 # Extract result
                 content = response.choices[0].message.content or ""
@@ -507,6 +555,24 @@ class AzureLLMClient:
                     logger.warning(f"Chat completion error (attempt {attempt}/{max_attempts}): {e}")
                     continue
                 else:
+                    raise
+
+            except APITimeoutError as e:
+                # Specific handling for timeout errors with configuration context
+                timeout_str = "infinite" if self.config.timeout_seconds is None else f"{self.config.timeout_seconds}s"
+                last_error = e
+                if attempt < max_attempts:
+                    logger.warning(
+                        f"API timeout on chat completion (attempt {attempt}/{max_attempts}), "
+                        f"configured timeout={timeout_str}, model={model}. Error: {e}"
+                    )
+                    continue
+                else:
+                    logger.error(
+                        f"API timeout on chat completion after {max_attempts} attempts, "
+                        f"configured timeout={timeout_str}, model={model}. "
+                        f"Consider increasing AZURE_TIMEOUT_SECONDS if needed."
+                    )
                     raise
 
             except Exception as e:
