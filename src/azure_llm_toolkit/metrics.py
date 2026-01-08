@@ -20,8 +20,8 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-from prometheus_client import Counter, Gauge, Histogram, Summary
 from opentelemetry import metrics as otel_metrics
+from prometheus_client import Counter, Gauge, Histogram, Summary
 
 PROMETHEUS_AVAILABLE = True
 OPENTELEMETRY_AVAILABLE = True
@@ -38,6 +38,7 @@ class OperationMetrics:
     tokens_input: int = 0
     tokens_output: int = 0
     tokens_cached: int = 0
+    tokens_reasoning: int = 0
     cost: float = 0.0
     error_type: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
@@ -54,6 +55,7 @@ class AggregatedMetrics:
     total_tokens_input: int = 0
     total_tokens_output: int = 0
     total_tokens_cached: int = 0
+    total_tokens_reasoning: int = 0
     total_cost: float = 0.0
     avg_duration_seconds: float = 0.0
     min_duration_seconds: float = float("inf")
@@ -148,6 +150,7 @@ class MetricsCollector:
         agg.total_tokens_input = sum(op.tokens_input for op in ops)
         agg.total_tokens_output = sum(op.tokens_output for op in ops)
         agg.total_tokens_cached = sum(op.tokens_cached for op in ops)
+        agg.total_tokens_reasoning = sum(op.tokens_reasoning for op in ops)
         agg.total_cost = sum(op.cost for op in ops)
 
         durations = [op.duration_seconds for op in ops]
@@ -280,6 +283,13 @@ class PrometheusMetrics:
                 token_type="cached",
             ).inc(metrics.tokens_cached)
 
+        if metrics.tokens_reasoning > 0:
+            self.tokens_total.labels(
+                operation=metrics.operation,
+                model=metrics.model,
+                token_type="reasoning",
+            ).inc(metrics.tokens_reasoning)
+
         # Record cost
         if metrics.cost > 0:
             self.cost_total.labels(
@@ -321,6 +331,7 @@ class MetricsTracker:
         self._tokens_input = 0
         self._tokens_output = 0
         self._tokens_cached = 0
+        self._tokens_reasoning = 0
         self._cost = 0.0
         self._metadata: dict[str, Any] = {}
 
@@ -341,15 +352,17 @@ class MetricsTracker:
         self._tokens_input = 0
         self._tokens_output = 0
         self._tokens_cached = 0
+        self._tokens_reasoning = 0
         self._cost = 0.0
         self._metadata = {}
         return self
 
-    def set_tokens(self, input: int = 0, output: int = 0, cached: int = 0) -> None:
+    def set_tokens(self, input: int = 0, output: int = 0, cached: int = 0, reasoning: int = 0) -> None:
         """Set token counts."""
         self._tokens_input = input
         self._tokens_output = output
         self._tokens_cached = cached
+        self._tokens_reasoning = reasoning
 
     def set_cost(self, cost: float) -> None:
         """Set cost."""
@@ -375,6 +388,7 @@ class MetricsTracker:
                 tokens_input=self._tokens_input,
                 tokens_output=self._tokens_output,
                 tokens_cached=self._tokens_cached,
+                tokens_reasoning=self._tokens_reasoning,
                 cost=self._cost,
                 error_type=exc_type.__name__ if exc_type else None,
                 metadata=self._metadata,
@@ -398,6 +412,7 @@ class MetricsTracker:
                 tokens_input=self._tokens_input,
                 tokens_output=self._tokens_output,
                 tokens_cached=self._tokens_cached,
+                tokens_reasoning=self._tokens_reasoning,
                 cost=self._cost,
                 error_type=exc_type.__name__ if exc_type else None,
                 metadata=self._metadata,

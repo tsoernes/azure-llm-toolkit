@@ -441,8 +441,15 @@ class AzureLLMClient:
                 response = await self.client.chat.completions.create(**kwargs)
                 elapsed = time.time() - start_time
 
-                # Log timing info
-                logger.debug(f"Chat completion completed in {elapsed:.2f}s (model={model})")
+                # Log timing info with usage details
+                usage = UsageInfo.from_openai_usage(response.usage)
+                log_msg = f"Chat completion completed in {elapsed:.2f}s (model={model}, tokens={usage.total_tokens}"
+                if usage.reasoning_tokens > 0:
+                    log_msg += f", reasoning_tokens={usage.reasoning_tokens}"
+                if usage.cached_prompt_tokens > 0:
+                    log_msg += f", cached={usage.cached_prompt_tokens}"
+                log_msg += ")"
+                logger.debug(log_msg)
 
                 # Warn if request took unusually long (>30s for reasoning models, >10s for others)
                 threshold = 30.0 if any(x in model.lower() for x in ["o1", "gpt-5"]) else 10.0
@@ -452,10 +459,9 @@ class AzureLLMClient:
                         f"threshold={threshold}s). This is normal for reasoning models."
                     )
 
-                # Extract result
+                # Extract result (usage already extracted above for logging)
                 content = response.choices[0].message.content or ""
                 finish_reason = response.choices[0].finish_reason
-                usage = UsageInfo.from_openai_usage(response.usage)
 
                 # Update rate limiter with actual usage
                 if self.enable_rate_limiting and self.rate_limiter_pool and response.usage:
@@ -471,6 +477,9 @@ class AzureLLMClient:
                 cost = 0.0
                 if track_cost and self.cost_tracker:
                     cost = self.cost_estimator.estimate_cost_from_usage(model, usage)
+                    metadata = {"operation": "chat_completion"}
+                    if usage.reasoning_tokens > 0:
+                        metadata["reasoning_tokens"] = usage.reasoning_tokens
                     self.cost_tracker.record_cost(
                         category="chat",
                         model=model,
@@ -479,7 +488,7 @@ class AzureLLMClient:
                         tokens_cached_input=usage.cached_prompt_tokens,
                         currency=self.cost_estimator.currency,
                         amount=cost,
-                        metadata={"operation": "chat_completion"},
+                        metadata=metadata,
                     )
 
                 if metrics_tracker is not None:
@@ -487,6 +496,7 @@ class AzureLLMClient:
                         input=usage.prompt_tokens,
                         output=usage.completion_tokens,
                         cached=usage.cached_prompt_tokens,
+                        reasoning=usage.reasoning_tokens,
                     )
                     metrics_tracker.set_cost(cost)
 

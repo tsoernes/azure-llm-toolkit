@@ -14,6 +14,7 @@ class UsageInfo:
     completion_tokens: int = 0
     total_tokens: int = 0
     cached_prompt_tokens: int = 0
+    reasoning_tokens: int = 0
 
     @classmethod
     def from_openai_usage(cls, usage: Any) -> UsageInfo:
@@ -23,16 +24,24 @@ class UsageInfo:
 
         # Handle prompt_tokens_details which may be a structured object
         cached = 0
-        details = getattr(usage, "prompt_tokens_details", None)
-        if details is not None:
+        prompt_details = getattr(usage, "prompt_tokens_details", None)
+        if prompt_details is not None:
             # Newer OpenAI clients return a PromptTokensDetails object
-            cached = getattr(details, "cached_tokens", 0) or 0
+            cached = getattr(prompt_details, "cached_tokens", 0) or 0
+
+        # Handle completion_tokens_details for reasoning tokens
+        reasoning = 0
+        completion_details = getattr(usage, "completion_tokens_details", None)
+        if completion_details is not None:
+            # Extract reasoning_tokens from CompletionTokensDetails
+            reasoning = getattr(completion_details, "reasoning_tokens", 0) or 0
 
         return cls(
             prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
             completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
             total_tokens=getattr(usage, "total_tokens", 0) or 0,
             cached_prompt_tokens=cached,
+            reasoning_tokens=reasoning,
         )
 
     def to_dict(self) -> dict[str, int]:
@@ -42,6 +51,7 @@ class UsageInfo:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
             "cached_prompt_tokens": self.cached_prompt_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
         }
 
 
