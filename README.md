@@ -67,7 +67,7 @@ The library loads configuration from environment variables by default. Common va
 - `AZURE_CHAT_DEPLOYMENT` — default: `gpt-5-mini`
 - `AZURE_RERANKER_DEPLOYMENT` — default: `gpt-4o-east-US`
 - `AZURE_EMBEDDING_DEPLOYMENT` — default: `text-embedding-3-large`
-- `AZURE_TIMEOUT_SECONDS` — request timeout (default: `60`)
+- `AZURE_TIMEOUT_SECONDS` — request timeout in seconds (default: `None` = infinite, recommended for reasoning models)
 - `AZURE_MAX_RETRIES` — default: `5`
 - `TOKENIZER_MODEL` — model used by tiktoken for token counting (defaults to chat deployment)
 - `FORCE_EMBED_DIM` — optional integer to force embedding dim (useful in tests/offline)

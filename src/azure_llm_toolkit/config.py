@@ -59,8 +59,12 @@ class AzureConfig(BaseModel):
     reranker_deployment: str = Field(default=os.getenv("AZURE_RERANKER_DEPLOYMENT", "gpt-4o-east-US"))
     embedding_deployment: str = Field(default=os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-large"))
 
-    # Request configuration
-    timeout_seconds: float = Field(default=float(os.getenv("AZURE_TIMEOUT_SECONDS", "60")))
+    # Request configuration (None = infinite timeout, recommended for reasoning models)
+    timeout_seconds: float | None = Field(
+        default_factory=lambda: float(os.getenv("AZURE_TIMEOUT_SECONDS"))
+        if os.getenv("AZURE_TIMEOUT_SECONDS")
+        else None
+    )
     max_retries: int = Field(default=int(os.getenv("AZURE_MAX_RETRIES", "5")))
 
     # Tokenizer model (defaults to chat deployment)
