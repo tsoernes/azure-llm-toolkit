@@ -1,5 +1,5 @@
 azure-llm-toolkit/README.md#L1-220
-# Azure LLM Toolkit (v0.2.0)
+# Azure LLM Toolkit (v0.2.1)
 
 A Python toolkit that wraps Azure OpenAI interactions with production-friendly features:
 - Rate limiting (RPM / TPM)
@@ -11,7 +11,7 @@ A Python toolkit that wraps Azure OpenAI interactions with production-friendly f
 - Enhanced logging with timeout and performance monitoring
 - Utilities: token counting, streaming, reranking helpers
 
-This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.0).
+This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.1).
 
 ---
 ## Key components (API surface)

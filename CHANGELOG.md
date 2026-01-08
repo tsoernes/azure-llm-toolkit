@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-01-08
+
+### Added
+
+- **Reasoning token tracking and logging**
+  - Added `reasoning_tokens` field to `UsageInfo` type
+  - Automatic extraction from `completion_tokens_details.reasoning_tokens`
+  - Enhanced DEBUG logs show reasoning tokens: `tokens=X, reasoning_tokens=Y`
+  - Metrics system tracks reasoning tokens (OperationMetrics, AggregatedMetrics)
+  - Prometheus export includes `token_type='reasoning'`
+  - Cost tracking metadata includes reasoning tokens
+  - Full backward compatibility (defaults to 0 for non-reasoning models)
+
+- **Comprehensive example**
+  - New `examples/reasoning_tokens_example.py` (287 lines)
+  - Demonstrates reasoning token tracking with o1/GPT-5 models
+  - Shows metrics collection and cost analysis
+  - Compares reasoning efforts (low/medium/high)
+  - Includes Prometheus export example
+
+### Changed
+
+- Updated README.md to mention reasoning token tracking feature
+- Enhanced chat completion logs to include reasoning token counts
+
 ## [0.2.0] - 2026-01-08
 
 ### ⚠️ Breaking Changes
@@ -74,10 +99,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History Summary
 
+- **0.2.1**: Reasoning token tracking and logging for o1/GPT-5 models
 - **0.2.0**: Breaking change - infinite timeout default, enhanced logging
 - **0.1.6**: Pricing updates
 - **0.1.5**: Initial stable release
 
+[0.2.1]: https://github.com/torsteinsornes/azure-llm-toolkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/torsteinsornes/azure-llm-toolkit/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/torsteinsornes/azure-llm-toolkit/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/torsteinsornes/azure-llm-toolkit/releases/tag/v0.1.5
