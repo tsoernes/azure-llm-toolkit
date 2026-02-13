@@ -75,6 +75,46 @@ def _log_retry_attempt(retry_state):
     )
 
 
+def _prepare_gpt5_kwargs(kwargs: dict[str, Any], model: str) -> dict[str, Any]:
+    """
+    Prepare API kwargs for GPT-5 models by converting incompatible parameters.
+
+    GPT-5 models require:
+    - max_completion_tokens instead of max_tokens
+    - No temperature parameter
+
+    Args:
+        kwargs: Original API kwargs
+        model: Model name
+
+    Returns:
+        Modified kwargs with GPT-5 compatible parameters
+    """
+    if "gpt-5" not in model.lower():
+        return kwargs
+
+    # Create a copy to avoid modifying the original
+    kwargs = kwargs.copy()
+
+    # Convert max_tokens to max_completion_tokens
+    if "max_tokens" in kwargs:
+        max_tokens_value = kwargs.pop("max_tokens")
+        kwargs["max_completion_tokens"] = max_tokens_value
+        logger.warning(
+            f"GPT-5 model detected: Converted max_tokens={max_tokens_value} to "
+            f"max_completion_tokens={max_tokens_value} for model {model}"
+        )
+
+    # Remove temperature parameter
+    if "temperature" in kwargs:
+        temp_value = kwargs.pop("temperature")
+        logger.warning(
+            f"GPT-5 model detected: Removed temperature={temp_value} parameter (not supported by model {model})"
+        )
+
+    return kwargs
+
+
 class AzureLLMClient:
     """
     Azure OpenAI client with advanced features:
@@ -431,6 +471,9 @@ class AzureLLMClient:
         if tool_choice is not None:
             kwargs["tool_choice"] = tool_choice
 
+        # Prepare kwargs for GPT-5 models (convert max_tokens, remove temperature)
+        kwargs = _prepare_gpt5_kwargs(kwargs, model)
+
         # Make API call with retry on specific errors
         max_attempts = 3
         last_error: Exception | None = None
@@ -657,6 +700,9 @@ class AzureLLMClient:
             kwargs["tools"] = tools
         if tool_choice is not None:
             kwargs["tool_choice"] = tool_choice
+
+        # Prepare kwargs for GPT-5 models (convert max_tokens, remove temperature)
+        kwargs = _prepare_gpt5_kwargs(kwargs, model)
 
         # Call streaming API
         async with self.client.chat.completions.stream(**kwargs) as stream:  # type: ignore[attr-defined]

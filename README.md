@@ -1,5 +1,5 @@
 azure-llm-toolkit/README.md#L1-220
-# Azure LLM Toolkit (v0.2.2)
+# Azure LLM Toolkit (v0.2.3)
 
 A Python toolkit that wraps Azure OpenAI interactions with production-friendly features:
 - Rate limiting (RPM / TPM)
@@ -11,7 +11,7 @@ A Python toolkit that wraps Azure OpenAI interactions with production-friendly f
 - Enhanced logging with timeout and performance monitoring
 - Utilities: token counting, streaming, reranking helpers
 
-This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.2).
+This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.3).
 
 ---
 ## Key components (API surface)
@@ -56,6 +56,32 @@ Development extras:
 
 ```/dev/null/example.md#L1-4
 pip install -e ".[dev]"
+```
+
+---
+## GPT-5 Model Support
+
+The toolkit automatically handles parameter conversion for GPT-5 models:
+
+- **Automatic `max_tokens` → `max_completion_tokens` conversion**: GPT-5 models require `max_completion_tokens` instead of `max_tokens`. The client automatically converts this parameter and logs a warning.
+- **Automatic `temperature` removal**: GPT-5 models don't support the `temperature` parameter. The client automatically removes it and logs a warning.
+- **Case-insensitive detection**: Works with any model name containing "gpt-5" (e.g., "gpt-5", "GPT-5-mini", "gpt-5-turbo").
+
+This means you can use the same code for both GPT-4 and GPT-5 models without modification:
+
+```/dev/null/example.md#L1-20
+from azure_llm_toolkit import AzureConfig, AzureLLMClient
+
+client = AzureLLMClient(AzureConfig())
+
+# Works with both GPT-4 and GPT-5 models
+# For GPT-5, max_tokens is automatically converted to max_completion_tokens
+# and temperature is automatically removed
+result = await client.chat_completion(
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=100,
+    temperature=0.7  # Automatically removed for GPT-5
+)
 ```
 
 ---

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-02-13
+
+### Added
+
+- **Automatic GPT-5 parameter conversion**
+  - Automatically converts `max_tokens` to `max_completion_tokens` for GPT-5 models
+  - Automatically removes `temperature` parameter for GPT-5 models (not supported)
+  - Case-insensitive detection of "gpt-5" in model names
+  - Logs warnings when parameters are converted or removed
+  - Applies to both `chat_completion()` and `chat_completion_stream()` methods
+  - Preserves all other parameters unchanged
+  - Comprehensive test coverage for parameter conversion
+
+### Changed
+
+- Enhanced error handling with proactive parameter conversion for GPT-5 models
+- Improved developer experience by eliminating manual parameter adjustments
+
 ## [0.2.2] - 2026-01-09
 
 ### Fixed
@@ -118,6 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **0.1.6**: Pricing updates
 - **0.1.5**: Initial stable release
 
+[0.2.3]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.1.6...v0.2.0
