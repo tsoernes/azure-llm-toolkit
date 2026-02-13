@@ -186,6 +186,7 @@ class TestGPT5ParameterConversion:
             completion_tokens=5,
             total_tokens=15,
             completion_tokens_details=MagicMock(reasoning_tokens=0),
+            prompt_tokens_details=MagicMock(cached_tokens=0),
         )
         mock_response.model = "gpt-5-mini"
 
@@ -231,6 +232,7 @@ class TestGPT5ParameterConversion:
         # Mock streaming response
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock(delta=MagicMock(content="Hello"))]
+        mock_chunk.usage = None
 
         async def mock_stream():
             yield mock_chunk

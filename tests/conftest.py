@@ -53,7 +53,7 @@ def sample_messages():
     return [{"role": "user", "content": "What is 2+2?"}]
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def check_credentials():
     """Check that required credentials are set before running tests."""
     required_vars = ["AZURE_OPENAI_API_KEY", "AZURE_ENDPOINT"]
@@ -63,3 +63,27 @@ def check_credentials():
 
     if missing:
         pytest.skip(f"Missing required environment variables: {', '.join(missing)}")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Mark integration tests that require credentials."""
+    skip_no_creds = pytest.mark.skip(reason="Missing Azure credentials")
+
+    # Tests that don't require credentials (unit tests)
+    unit_test_patterns = [
+        "test_gpt5_parameter_conversion",
+        "test_extract_text_from_content_helper",
+        "test_validation",
+    ]
+
+    required_vars = ["AZURE_OPENAI_API_KEY", "AZURE_ENDPOINT"]
+    missing = [
+        var for var in required_vars if not os.getenv(var) and not os.getenv(var.replace("AZURE_OPENAI_", "AZURE_"))
+    ]
+
+    if missing:
+        for item in items:
+            # Skip only if it's not a unit test (check both file path and node name)
+            is_unit_test = any(pattern in str(item.fspath) or pattern in item.nodeid for pattern in unit_test_patterns)
+            if not is_unit_test:
+                item.add_marker(skip_no_creds)
