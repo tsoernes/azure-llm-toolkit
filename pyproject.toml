@@ -1,6 +1,6 @@
 [project]
 name = "azure-llm-toolkit"
-version = "0.2.1"
+version = "0.2.2"
 description = "Azure OpenAI client wrapper with rate limiting, cost tracking, and retry logic"
 readme = "README.md"
 authors = [
@@ -47,9 +47,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/torsteinsornes/azure-llm-toolkit"
-Repository = "https://github.com/torsteinsornes/azure-llm-toolkit"
-Issues = "https://github.com/torsteinsornes/azure-llm-toolkit/issues"
+Homepage = "https://github.com/tsoernes/azure-llm-toolkit"
+Repository = "https://github.com/tsoernes/azure-llm-toolkit"
+Issues = "https://github.com/tsoernes/azure-llm-toolkit/issues"
 
 [build-system]
 requires = ["hatchling"]

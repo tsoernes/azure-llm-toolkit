@@ -170,7 +170,7 @@ from .validation import (
     parse_json_response,
 )
 
-__version__ = "0.1.6"
+__version__ = "0.2.2"
 
 __all__ = [
     # Main client

@@ -19,7 +19,7 @@ Please be respectful and constructive in all interactions. We aim to foster an i
 1. **Fork and clone the repository**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/azure-llm-toolkit.git
+git clone https://github.com/tsoernes/azure-llm-toolkit.git
 cd azure-llm-toolkit
 ```
 

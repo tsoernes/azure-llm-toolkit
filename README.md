@@ -1,5 +1,5 @@
 azure-llm-toolkit/README.md#L1-220
-# Azure LLM Toolkit (v0.2.1)
+# Azure LLM Toolkit (v0.2.2)
 
 A Python toolkit that wraps Azure OpenAI interactions with production-friendly features:
 - Rate limiting (RPM / TPM)
@@ -11,7 +11,7 @@ A Python toolkit that wraps Azure OpenAI interactions with production-friendly f
 - Enhanced logging with timeout and performance monitoring
 - Utilities: token counting, streaming, reranking helpers
 
-This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.1).
+This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.2).
 
 ---
 ## Key components (API surface)
@@ -47,7 +47,7 @@ pip install azure-llm-toolkit
 Or install editable from source:
 
 ```/dev/null/example.md#L1-4
-git clone https://github.com/torsteinsornes/azure-llm-toolkit.git
+git clone https://github.com/tsoernes/azure-llm-toolkit.git
 cd azure-llm-toolkit
 pip install -e .
 ```
@@ -198,6 +198,29 @@ client = AzureLLMClient(config=AzureConfig(), rate_limiter_pool=pool, enable_rat
 ```
 
 The Polars embedder also respects token/list limits configured at construction.
+
+---
+## Examples
+
+The `examples/` directory contains comprehensive runnable demonstrations:
+
+- **`basic_usage.py`** — Simple async client usage for embeddings and chat
+- **`sync_client_example.py`** — Synchronous wrapper examples
+- **`batch_embedding_example.py`** — Basic batch embedding patterns
+- **`polars_batch_embedder_comprehensive.py`** — High-performance batch embeddings with Polars
+- **`caching_example.py`** — Disk-based caching for embeddings and completions
+- **`function_calling_example.py`** — Function/tool calling with Azure OpenAI
+- **`reasoning_tokens_example.py`** — Tracking reasoning tokens for o1/GPT-5 models
+- **`reranker_demo_simple.py`** — Basic logprob-based reranking
+- **`reranker_example.py`** — Advanced reranking with scoring
+- **`reranker_rate_limiting_example.py`** — Reranking with rate limit coordination
+- **`prometheus_demo_simple.py`** — Basic Prometheus metrics export
+- **`prometheus_live_demo.py`** — Live metrics collection and export
+- **`prometheus_dashboard_example.py`** — Dashboard generation for monitoring
+- **`otel_jaeger_demo.py`** — OpenTelemetry tracing with Jaeger integration
+- **`check_batch_quota.py`** — Check Azure batch API quotas
+
+Browse examples at: https://github.com/tsoernes/azure-llm-toolkit/tree/master/examples
 
 ---
 ## Cost estimation & tracking
