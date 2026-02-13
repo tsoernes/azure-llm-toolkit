@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-02-13
+
+### Added
+
+- **Vision model support**
+  - Support for vision messages with images (URL and base64)
+  - Added `_extract_text_from_content()` helper to safely extract text from message content
+  - Handles both simple string content and vision message format with image parts
+  - Token counting now works correctly with vision messages
+  - Updated type hints to use `Any` for message content to support both text and vision formats
+  - Comprehensive test suite for vision integration
+
+### Fixed
+
+- **Token counting error with vision messages**
+  - Fixed `TypeError: expected string or buffer` when passing images to models
+  - `count_message_tokens()` now properly handles vision message content
+  - Rate limiter estimation now works with vision messages
+
+### Changed
+
+- Updated message type hints from `list[dict[str, str]]` to `list[dict[str, Any]]` to support vision content
+- Enhanced `count_message_tokens()` to extract and count only text portions of vision messages
+
 ## [0.2.3] - 2026-02-13
 
 ### Added
@@ -136,6 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **0.1.6**: Pricing updates
 - **0.1.5**: Initial stable release
 
+[0.2.4]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/tsoernes/azure-llm-toolkit/compare/v0.2.0...v0.2.1

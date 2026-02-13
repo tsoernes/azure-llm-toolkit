@@ -1,5 +1,5 @@
 azure-llm-toolkit/README.md#L1-220
-# Azure LLM Toolkit (v0.2.3)
+# Azure LLM Toolkit (v0.2.4)
 
 A Python toolkit that wraps Azure OpenAI interactions with production-friendly features:
 - Rate limiting (RPM / TPM)
@@ -11,7 +11,7 @@ A Python toolkit that wraps Azure OpenAI interactions with production-friendly f
 - Enhanced logging with timeout and performance monitoring
 - Utilities: token counting, streaming, reranking helpers
 
-This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.3).
+This repository is packaged as `azure-llm-toolkit` (see `pyproject.toml`, version 0.2.4).
 
 ---
 ## Key components (API surface)
@@ -68,6 +68,90 @@ The toolkit automatically handles parameter conversion for GPT-5 models:
 - **Case-insensitive detection**: Works with any model name containing "gpt-5" (e.g., "gpt-5", "GPT-5-mini", "gpt-5-turbo").
 
 This means you can use the same code for both GPT-4 and GPT-5 models without modification:
+
+```/dev/null/example.md#L1-20
+import base64
+
+with open("image.jpg", "rb") as f:
+    base64_image = base64.b64encode(f.read()).decode()
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe this image"},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+        ],
+    }
+]
+
+result = await client.chat_completion(messages=messages, max_tokens=100)
+```
+
+**Token counting with vision messages:**
+
+The toolkit automatically extracts text from vision messages for token estimation:
+
+```/dev/null/example.md#L1-15
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What do you see?"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
+        ],
+    }
+]
+
+# Token counting works correctly with vision messages
+token_count = client.count_message_tokens(messages)
+print(f"Estimated tokens: {token_count}")
+```
+
+---
+## Vision Model Support
+
+The toolkit supports vision models with both URL-based and base64-encoded images:
+
+**Simple vision message:**
+
+```/dev/null/example.md#L1-20
+from azure_llm_toolkit import AzureConfig, AzureLLMClient
+
+client = AzureLLMClient(AzureConfig())
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What's in this image?"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
+        ],
+    }
+]
+
+result = await client.chat_completion(messages=messages, max_tokens=100)
+print(result.content)
+```
+
+**Multiple images:**
+
+```/dev/null/example.md#L1-25
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Compare these images:"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/img1.jpg"}},
+            {"type": "image_url", "image_url": {"url": "https://example.com/img2.jpg"}},
+        ],
+    }
+]
+
+result = await client.chat_completion(messages=messages, max_tokens=150)
+```
+
+**Base64-encoded images:**
 
 ```/dev/null/example.md#L1-20
 from azure_llm_toolkit import AzureConfig, AzureLLMClient

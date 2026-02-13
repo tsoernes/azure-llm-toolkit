@@ -1,180 +1,211 @@
-# Repository Summary
+# azure-llm-toolkit Code and Architecture Summary
 
 ## Executive Overview
 
-## Executive overview
+# Azure LLM Toolkit — Executive Overview
 
-This repository is organized as a Python project using a **`src/` layout**, with the primary library code housed in `src/azure_llm_toolkit`. Based on the package name and surrounding structure, it appears intended to provide a reusable toolkit for working with Azure-hosted LLM capabilities, accompanied by practical collateral (examples, notebooks), quality gates (tests, CI workflows), and performance measurement (benchmarks).
+Purpose
 
-### High-level architecture
-- **Core library**: `src/azure_llm_toolkit` is the main distributable package; it likely contains the public API surface, implementation modules, and internal utilities.
-- **Validation**: `tests/` and `tests/integration/` suggest a split between fast/local tests and environment-dependent integration checks.
-- **Enablement**: `examples/` and `notebooks/` provide runnable demonstrations and exploratory workflows.
-- **Performance**: `benchmarks/` indicates a place to track and compare runtime/performance characteristics over time.
-- **Documentation & automation**: `docs/` supports user/developer documentation, while `.github/workflows/` provides CI/CD automation (e.g., test runs, linting, packaging).
+The Azure LLM Toolkit is an async-first library that wraps Azure OpenAI/LLM interactions and provides production-oriented features — rate limiting, batch embedding, caching, cost tracking, reranking, structured-output validation, function-calling tools, observability, and resiliency primitives.
 
-### Key structural patterns
-- **Separation of concerns by top-level directories** (library vs. tests vs. docs vs. examples).
-- **`src/`-based packaging** (helps prevent accidentally importing from the working directory during development).
-- **Dedicated integration test area** (suggests some tests require external services/credentials or live Azure resources).
+Architecture at a glance
+
+- Core async client: an AzureLLMClient that coordinates rate limiters, circuit breaker, caching and cost tracking and exposes single-item and batch-friendly APIs.
+- Batch processing: logical batch runners (ChatBatchRunner / EmbeddingBatchRunner) plus a Polars-based PolarsBatchEmbedder for high-throughput embedding jobs; batch_api adapters and a MockBatchAPIClient enable offline testing and optional Azure Batch API usage.
+- Cross-cutting subsystems: token-bucket RateLimiter (RPM/TPM) with a RateLimiterPool, disk-based caches (npy/json) managed by a CacheManager, a MetricsCollector with a Prometheus adapter, optional OpenTelemetry integration, and a CircuitBreaker for fault isolation.
+
+Major subsystems
+
+- Configuration & token utilities (config.py)
+- Core client & sync wrapper (client.py, sync_client.py)
+- Rate limiting & quota enforcement (rate_limiter.py)
+- Batch runners & Polars embedder (batch.py, batch_embedder.py, batch_api.py)
+- Caching layer (cache.py)
+- Logprob reranker (reranker.py)
+- Structured-output validation & function-calling tools (validation.py, tools.py)
+- Observability, metrics & cost tracking (metrics.py, cost_tracker.py, analytics.py, opentelemetry_integration.py)
+- Resiliency, health checks and operational helpers (circuit_breaker.py, health.py, dashboard.py)
+
+Key design patterns & operational considerations
+
+- Async-first core with a thin sync wrapper for blocking use-cases.
+- Pluggable subsystems and adapters (rate limiters, caches, metrics, batch APIs) to enable testing and environment-specific wiring.
+- Token-bucket RPM/TPM model for combined request/token throttling and a RateLimiterPool for multi-model concurrency.
+- Deterministic batching and long-text splitting with weighted averaging for embedding quality at scale (Polars-based embedder).
+- Logprob-based reranking using binning and expected-value scoring that integrates with rate limiting and metrics.
+- Emphasis on observability (Prometheus exporter + optional OTEL), cost tracking, and operational controls (circuit breaker, health checks).
+
+Typical workflows & extension points
+
+Create an AzureConfig and AzureLLMClient, attach a RateLimiterPool and CacheManager, run bulk embeddings with PolarsBatchEmbedder or EmbeddingBatchRunner, use the LogprobReranker for document reordering, and enable Prometheus / OTEL exporters for operational telemetry. The codebase provides mocks, examples, and notebooks to accelerate development and to safely exercise production patterns in CI and local environments.
 
 ## Directory & File Hierarchy for key files
 
 ## .
 
-Repository root containing the main top-level subsystems: source code (`src/`), tests (`tests/`), documentation (`docs/`), examples and notebooks, benchmarks, and GitHub automation configuration.
-
-**Files:**
-
-- `.gitignore` : (no summary)
-- `.python-version` : (no summary)
-- `.rules` : (no summary)
-- `CONTRIBUTING.md` : (no summary)
-- `LICENSE` : (no summary)
-- `README.md` : (no summary)
-- `pyproject.toml` : (no summary)
-- `show_metrics.py` : (no summary)
+Repository root and project metadata: README.md (primary user-facing guide), CHANGELOG.md (release notes and breaking-change guidance), pyproject.toml (packaging and dependency configuration — versioned at 0.2.3), CONTRIBUTING.md, LICENSE and utility scripts (e.g., show_metrics.py). Top-level folders include src, tests, examples, docs, notebooks and CI configuration.
 
 ### .github
 
-GitHub configuration directory. Includes workflow automation under `workflows/` and may also host issue templates, PR templates, or other repository metadata.
+GitHub metadata directory (contains CI/workflows configuration used for publishing and other automation).
 
 #### .github/workflows
+
+CI workflow(s); publish.yml implements a release workflow that builds and publishes package artifacts to PyPI on version tags.
+
 **Files:**
 
-- `.github/workflows/publish.yml` : (no summary)
+- `.github/workflows/publish.yml` (rel=2): CI workflow for publishing package artifacts to PyPI on version tags: checks out code, sets up Python, derives version from tag, updates pyproject.toml, builds with uv, and uploads via twine using a PYPI_TOKEN secret.
 
 ### benchmarks
+
+Benchmark harness for measuring throughput and latency of core components and runners. benchmark_runners.py provides a configurable runner to profile AzureLLMClient, batch runners and the reranker in real or dummy modes.
+
 **Files:**
 
-- `benchmarks/benchmark_runners.py` : (no summary)
+- `benchmarks/benchmark_runners.py` (rel=2): Benchmarking harness for measuring throughput and latency of core components (AzureLLMClient chat/embed, ChatBatchRunner, EmbeddingBatchRunner, LogprobReranker) in real or dummy modes; computes latency percentiles and ops/sec to characterize performance.
 
 ### docs
 
-Project documentation sources (e.g., user guides, API references, contribution notes). Usually paired with a documentation build toolchain.
+Consumer- and maintainer-facing documentation and design notes. Key files include PROJECT_SUMMARY.md (high-level overview), IMPLEMENTATION_STATUS.md, MIGRATION_GUIDE.md, RERANKER_IMPLEMENTATION.md, and guides covering batch API constraints, timeout/logging practices, feature roadmap, and operational metrics.
 
 **Files:**
 
-- `docs/FEATURES_AND_IMPROVEMENTS.md` : (no summary)
-- `docs/IMPLEMENTATION_STATUS.md` : (no summary)
-- `docs/LIVE_METRICS_SUMMARY.md` : (no summary)
-- `docs/MIGRATION_GUIDE.md` : (no summary)
-- `docs/PROJECT_SUMMARY.md` : (no summary)
-- `docs/RERANKER_IMPLEMENTATION.md` : (no summary)
+- `docs/BATCH_API_NOTES.md` (rel=3): Detailed notes on Polars embedder rate limiting and Azure Batch API constraints: explains dual local/optional rate limiting in PolarsBatchEmbedder, Azure batch enqueued token quotas, best practices for quota management, and recommendations for robust Batch API usage and future implementation steps.
+- `docs/BATCH_VS_STANDARD_GUIDE.md` (rel=3): Decision guide comparing Batch API vs standard API for embeddings, with decision tree, cost examples, quotas/limits, usage patterns and migration recommendations to help choose between real-time and bulk processing strategies.
+- `docs/FEATURES_AND_IMPROVEMENTS.md` (rel=3): Roadmap/style document listing suggested features and enhancements (streaming, function calling, batch API, vision support, advanced caching, sync wrapper, validation, model routing, logging improvements, CLI, retry strategies) with implementation notes and code sketches to guide future development.
+- `docs/IMPLEMENTATION_STATUS.md` (rel=3): Status document tracking requested features and their implementation; lists completed features (function calling, batch support, sync wrapper, validation, analytics, OTEL, tests, benchmarks, notebooks, health checks, conversation manager) and provides per-feature notes and files added — useful for project tracking.
+- `docs/LIVE_METRICS_SUMMARY.md` (rel=2): Operational metrics snapshot and Prometheus queries showing live RPM/TPM, costs, and running services; intended as an operational demonstration of metrics/monitoring integration and dashboards.
+- `docs/MIGRATION_GUIDE.md` (rel=3): Step-by-step migration instructions for moving from rag-mcp to azure-llm-toolkit: mapping old APIs to new ones, configuration changes, examples of updating embeddings/chat/cost tracking, breaking changes, and a recommended gradual migration strategy.
+- `docs/PROJECT_SUMMARY.md` (rel=4): High-level project overview and feature list for the Azure LLM Toolkit including architecture highlights, core components (client, rate limiting, cost tracking), supported features, dependencies, usage examples, and roadmap/migration guidance. Acts as a README-level summary for stakeholders.
+- `docs/RERANKER_IMPLEMENTATION.md` (rel=3): Design and implementation notes for a logprob-based reranker: explains RerankerConfig, LogprobReranker algorithm (binning, logprob softmax, expected value scoring), rate limiter integration, cost/latency characteristics, tests and examples — documents how reranking fits into the toolkit.
+- `docs/TIMEOUT_AND_LOGGING.md` (rel=3): Guidance on timeout configuration and logging: default timeout semantics (infinite by default), how to set timeouts, logging levels and examples, retry/backoff interpretation, best practices and troubleshooting for timeouts and slow requests.
 
 ### examples
 
-Contains runnable example programs or scripts demonstrating how to use the library. This is typically aimed at helping users get started and showcasing common usage patterns.
+Runnable example scripts demonstrating the toolkit's common usage patterns and operational integrations. Includes basic usage, Polars batch embedding recipes, reranker demos, function-calling examples, caching and sync-client samples, Prometheus/OTEL demos, and practical examples for rate-limiting and reasoning-token tracking.
 
 **Files:**
 
-- `examples/basic_usage.py` : (no summary)
-- `examples/batch_embedding_example.py` : (no summary)
-- `examples/caching_example.py` : (no summary)
-- `examples/function_calling_example.py` : (no summary)
-- `examples/otel_jaeger_demo.py` : (no summary)
-- `examples/prometheus_dashboard_example.py` : (no summary)
-- `examples/prometheus_demo_simple.py` : (no summary)
-- `examples/prometheus_live_demo.py` : (no summary)
-- `examples/reranker_demo_simple.py` : (no summary)
-- `examples/reranker_example.py` : (no summary)
-- `examples/reranker_rate_limiting_example.py` : (no summary)
-- `examples/sync_client_example.py` : (no summary)
+- `examples/basic_usage.py` (rel=4): Synchronous async examples covering embeddings, chat completions, cost tracking, rate limiting, metadata extraction, RAG answer generation, token counting, and other common client workflows. Serves as a concise cookbook for typical usage patterns.
+- `examples/batch_embedding_example.py` (rel=3): Examples focused on Polars batch embedding: small DataFrame embedding, large dataset processing, incremental embedding, handling long texts and cost-tracking with PolarsBatchEmbedder; practical guidance for batch embedding pipelines.
+- `examples/caching_example.py` (rel=3): Examples demonstrating disk-based caching for embeddings and chat completions: showing cache hits/misses, partial hits, statistics, selective caching per call, cache parameter sensitivity, clearing caches, and cost-savings scenarios—practical guide to caching usage.
+- `examples/function_calling_example.py` (rel=3): Comprehensive example demonstrating function/tool calling support: registers tools (sync/async), executes model-invoked tool calls, shows decorator-based registration, and multi-turn agent patterns. Illustrates practical agent/tool integration with AzureLLMClient.
+- `examples/otel_jaeger_demo.py` (rel=3): OpenTelemetry + Jaeger demo that initializes OTLP exporter, instruments chat/embedding/reranker workflows, and emits spans for tracing; supports 'real' and 'dummy' modes to demonstrate OTEL wiring and span attributes for debugging and observability.
+- `examples/polars_batch_embedder_comprehensive.py` (rel=4): Extensive examples for PolarsBatchEmbedder showcasing list embedding, DataFrame embedding, rate limiter integration, cost tracking, incremental embeddings, handling long texts via splitting and weighted averaging, and large dataset streaming. Acts as the definitive usage guide for high-throughput embedding workflows.
+- `examples/prometheus_dashboard_example.py` (rel=2): A demo that exposes a Prometheus-compatible metrics endpoint and an HTML dashboard, simulates or collects metrics, and provides an integrated visualization for operations and token/cost metrics. Useful as a local monitoring demo for operators.
+- `examples/prometheus_demo_simple.py` (rel=2): Lightweight Prometheus demo that simulates LLM operations to generate realistic metrics (request counts, latencies, tokens, costs) and serves a simple dashboard and /metrics endpoint without requiring Azure credentials—ideal for development and demos.
+- `examples/prometheus_live_demo.py` (rel=3): Live demo that runs real Azure OpenAI requests, collects Prometheus metrics, exposes a web dashboard and /metrics endpoint, and demonstrates request/token/cost metrics integration. Intended as a production-style example for metrics and monitoring setup.
+- `examples/reasoning_tokens_example.py` (rel=3): Examples that demonstrate reasoning token tracking for reasoning models (o1, GPT-5): shows how to request reasoning effort, log reasoning token counts, collect metrics, and analyze cost/ratio of reasoning tokens versus completion tokens. Useful for profiling complex reasoning workloads.
+- `examples/reranker_demo_simple.py` (rel=2): Non-network demonstration of the LogprobReranker API, showing configuration options, result structure, usage patterns, RAG integration patterns, and benefits; intended to educate on reranker concepts without making API calls.
+- `examples/reranker_example.py` (rel=4): Detailed reranker examples using real client calls (or configured environment): basic reranking, custom configs, bin probabilities, single document scoring, comparison of original vs reranked order, and RAG pipeline example—serves as the applied reference for reranker integration.
+- `examples/reranker_rate_limiting_example.py` (rel=3): Examples illustrating reranker usage with rate limiting: default and custom limits, shared rate limiters across rerankers, heavy parallel load, progressive scoring, and recovery behavior—practical guidance for production reranking under quotas.
+- `examples/sync_client_example.py` (rel=3): Examples showing usage of the synchronous wrapper AzureLLMClientSync: embedding, chat completions, cost estimation, token counting, batch embeddings, multi-turn conversation, and legacy integration patterns for non-async codebases.
 
 ### notebooks
 
-Jupyter notebooks for interactive exploration, tutorials, or experiments. Typically used for prototyping and demonstrating end-to-end workflows.
+Jupyter notebooks for onboarding and deeper explorations: getting-started material, rate-limiting strategies, cost-optimization techniques, RAG implementation patterns, agent patterns, and production deployment considerations. These are tutorial-style artifacts that complement the runnable examples.
 
 **Files:**
 
-- `notebooks/01_getting_started.ipynb` : (no summary)
-- `notebooks/02_rate_limiting_strategies.ipynb` : (no summary)
-- `notebooks/03_cost_optimization.ipynb` : (no summary)
-- `notebooks/04_rag_implementation.ipynb` : (no summary)
-- `notebooks/05_agent_patterns.ipynb` : (no summary)
-- `notebooks/06_production_deployment.ipynb` : (no summary)
+- `notebooks/01_getting_started.ipynb` (rel=2): Introductory Jupyter notebook demonstrating installation, configuration, creating the client, basic chat completions, streaming, sync client usage, function calling tools, and cost tracking — intended for onboarding and examples.
+- `notebooks/02_rate_limiting_strategies.ipynb` (rel=2): Interactive notebook covering rate limiting strategies, demonstrations of token-bucket behavior, custom rate limiter configurations, concurrency patterns, and adaptive limiting examples to help tune throughput vs quotas.
+- `notebooks/03_cost_optimization.ipynb` (rel=2): Notebook focused on cost optimization strategies (token usage reduction, caching, model selection and benchmarking examples) with code snippets using tiktoken and client examples.
+- `notebooks/04_rag_implementation.ipynb` (rel=2): Notebook focused on RAG implementation patterns and integration with the toolkit's embedding and reranking features; used as a tutorial and design reference.
+- `notebooks/05_agent_patterns.ipynb` (rel=2): Notebook demonstrating agent patterns and RAG/agent workflows using tools, function-calling examples and orchestration patterns; aimed at advanced usage patterns.
+- `notebooks/06_production_deployment.ipynb` (rel=2): Notebook describing production deployment considerations including caching, token optimization and best practices for deploying LLM workloads in production environments.
 
 ### src
 
-Source root following the `src/` layout for Python packaging. Keeps library code isolated from project tooling and tests to avoid import-path pitfalls.
+Top-level source directory that contains the azure_llm_toolkit package.
 
 #### src/azure_llm_toolkit
 
-Primary Python package for the repository. This directory is expected to contain the toolkit’s implementation and public APIs.
+Primary package containing the toolkit's implementation. Major modules implement configuration and token utilities (config.py), the async AzureLLMClient and a sync wrapper (client.py, sync_client.py), token-bucket rate limiting and pools (rate_limiter.py), batch runners and the Polars-based embedder (batch.py, batch_embedder.py, batch_api.py), disk caches and a CacheManager (cache.py), logprob reranker (reranker.py), structured-output validation and function-calling utilities (validation.py, tools.py), metrics/cost tracking/analytics (metrics.py, cost_tracker.py, analytics.py), streaming sinks, circuit breaker and health checks, dashboard utilities, and optional OpenTelemetry wiring. types.py centralizes domain dataclasses and __init__.py exposes the public API surface.
 
 **Files:**
 
-- `src/azure_llm_toolkit/__init__.py` : (no summary)
-- `src/azure_llm_toolkit/analytics.py` : (no summary)
-- `src/azure_llm_toolkit/batch.py` : (no summary)
-- `src/azure_llm_toolkit/batch_embedder.py` : (no summary)
-- `src/azure_llm_toolkit/cache.py` : (no summary)
-- `src/azure_llm_toolkit/circuit_breaker.py` : (no summary)
-- `src/azure_llm_toolkit/client.py` : (no summary)
-- `src/azure_llm_toolkit/client.py.bak` : (no summary)
-- `src/azure_llm_toolkit/config.py` : (no summary)
-- `src/azure_llm_toolkit/conversation.py` : (no summary)
-- `src/azure_llm_toolkit/cost_tracker.py` : (no summary)
-- `src/azure_llm_toolkit/dashboard.py` : (no summary)
-- `src/azure_llm_toolkit/health.py` : (no summary)
-- `src/azure_llm_toolkit/metrics.py` : (no summary)
-- `src/azure_llm_toolkit/opentelemetry_integration.py` : (no summary)
-- `src/azure_llm_toolkit/rate_limiter.py` : (no summary)
-- `src/azure_llm_toolkit/reranker.py` : (no summary)
-- `src/azure_llm_toolkit/streaming.py` : (no summary)
-- `src/azure_llm_toolkit/sync_client.py` : (no summary)
-- `src/azure_llm_toolkit/tools.py` : (no summary)
-- `src/azure_llm_toolkit/types.py` : (no summary)
-- `src/azure_llm_toolkit/validation.py` : (no summary)
+- `src/azure_llm_toolkit/__init__.py` (rel=3): Public API surface for the package exporting core classes and utilities (client, config, caching, rate limiting, batch tools, metrics, reranker, streaming, validation, etc.). Also documents library capabilities and sets package __version__. Serves as the single import entrypoint for consumers.
+- `src/azure_llm_toolkit/analytics.py` (rel=3): Cost analytics and reporting utilities: dataclasses for CostBreakdown, UsageStats, CostTrend, Anomaly, and CostReport plus a CostAnalytics class that derives breakdowns, usage stats, trends, and anomaly detection from a CostTracker's entries. Provides higher-level insights for cost management and trend analysis.
+- `src/azure_llm_toolkit/batch.py` (rel=4): Logical batch runner for chat and embedding workloads that provides concurrency control, progress callbacks, and integration with AzureLLMClient's rate limiting and retry logic. Exposes ChatBatchRunner and EmbeddingBatchRunner with per-item status/results, uses asyncio.Semaphore for concurrency limits, and returns ordered per-item results including errors, making it suitable for bulk processing without using Azure's Batch REST API.
+- `src/azure_llm_toolkit/batch_api.py` (rel=4): Mock and adapter implementations for batch embedding APIs: MockBatchAPIClient simulates an async batch job lifecycle and deterministic embeddings for testing/examples; also defines BatchJobStatus and helper job-monitoring utilities and partial BatchQuotaMonitor—used by PolarsBatchEmbedder to exercise batch workflows without a real service.
+- `src/azure_llm_toolkit/batch_embedder.py` (rel=4): High-performance Polars-based batch embedder optimized for large embedding jobs: tokenizes with tiktoken, creates deterministic batches, splits long texts, and combines split embeddings via weighted averaging. Handles intelligent batching, optional RateLimiter integration, retry logic with tenacity, and can optionally target a future Batch API path. Designed for throughput and cost-efficient large-scale embedding.
+- `src/azure_llm_toolkit/cache.py` (rel=4): Disk-based caching layer for embeddings and chat completions. Provides stable hashing for keys, EmbeddingCache (npy storage, batch helpers), ChatCache (json storage keyed by messages/model/params), and CacheManager aggregating both caches. Supports cache clearing and basic stats; designed to reduce redundant API calls and costs.
+- `src/azure_llm_toolkit/circuit_breaker.py` (rel=4): Circuit breaker implementation for protecting LLM calls: CLOSED/OPEN/HALF_OPEN states, configurable thresholds/timeouts, in-flight request limits in half-open, and async context manager support. Tracks metrics and durations, transitions state on failure/success, and raises CircuitBreakerError for fast-fail behavior to prevent cascading failures.
+- `src/azure_llm_toolkit/client.py` (rel=5): Core async Azure OpenAI client implementing retries, rate limiting coordination, caching, cost estimation/tracking, and single-item embedding/chat operations. It wraps an AsyncAzureOpenAI client, integrates RateLimiterPool and CacheManager, adapts GPT-5 kwargs, logs detailed retry attempts (with payload hashing), and exposes metrics hooks. Key behaviors include cache lookups/updates, acquiring token-based rate permits before calls, recording usage and cost via CostEstimator/CostTracker, and structured retry/backoff via tenacity.
+- `src/azure_llm_toolkit/config.py` (rel=5): Configuration management for Azure OpenAI: AzureConfig Pydantic model that loads from environment, normalizes endpoint, provides token encoder access (tiktoken), counts tokens, caches detected embedding dimension, and can instantiate AsyncAzureOpenAI clients; includes retry-wrapped detect_embedding_dimension probing the API and reading/writing local cache. Core to client initialization and token/cost logic.
+- `src/azure_llm_toolkit/conversation.py` (rel=4): ConversationManager for multi-turn chat workflows: ConversationMessage and ConversationConfig dataclasses, history management, token counting, automatic summarization (summarize_history and apply/trim logic), preparing messages for API calls, and send_message orchestration that integrates summarization, trimming, and appends assistant responses. Supports conversational UX with summary-based context windowing.
+- `src/azure_llm_toolkit/cost_tracker.py` (rel=4): Cost estimation and tracking utilities: CostEstimator with default per-model pricing (per 1M tokens), methods to set/get pricing and estimate cost from usage, and InMemoryCostTracker implementing a simple persistent JSONL-backed tracker. Provides CostTracker protocol for pluggable backends and is used to compute/record cost for API calls.
+- `src/azure_llm_toolkit/dashboard.py` (rel=3): Text-based dashboard utilities for rendering rate limiter snapshots, circuit breaker status, and aggregated operation metrics. Provides formatting helpers and functions to produce readable summaries for REPL/CLI inspection without heavy UI dependencies, enabling quick operational checks of rate limiting, health and metrics.
+- `src/azure_llm_toolkit/health.py` (rel=3): Health check and readiness probe utilities centered on AzureLLMClient: ComponentHealth and HealthCheckResult models, HealthChecker class performing API connectivity probes (embedding test), rate limiter, cache, and cost tracker checks, and producing aggregate health/readiness status for operational monitoring and probes.
+- `src/azure_llm_toolkit/metrics.py` (rel=5): Core metrics and telemetry module: defines OperationMetrics and AggregatedMetrics dataclasses, an in-memory MetricsCollector with aggregation and callbacks, Prometheus exporter adapter (PrometheusMetrics), and a MetricsTracker context helper for recording per-operation metrics (tokens, reasoning tokens, durations, cost). Central for observability and Prometheus/OTEL integration.
+- `src/azure_llm_toolkit/opentelemetry_integration.py` (rel=3): Optional OpenTelemetry integration utilities that avoid hard OTEL dependency: safe imports, tracer initialization helper, a no-op tracer/span fallback, start_span async context manager, and a decorator to trace async functions. Enables applications to opt into distributed tracing while keeping library usable when OTEL is absent.
+- `src/azure_llm_toolkit/rate_limiter.py` (rel=5): Implements token-bucket style rate limiting supporting both RPM (requests/minute) and TPM (tokens/minute) with sliding refill behavior, wait-time calculation, and usage adjustment after calls. Includes a RateLimiterPool to manage per-model limiters and an InFlightRateLimiter variant that combines token buckets with concurrency windows. Provides stats, reset, and singleton helper for global access.
+- `src/azure_llm_toolkit/reranker.py` (rel=5): Implementation of the logprob-based reranker: RerankerConfig and RerankResult dataclasses, utilities (_softmax_logprobs, _expected_from_bins, _build_messages), and LogprobReranker class which calls the chat completion API to fetch token logprobs, converts logprobs to bin probabilities via softmax, computes expected relevance scores, and integrates with a RateLimiter. Core algorithmic component for calibrated zero-shot reranking.
+- `src/azure_llm_toolkit/streaming.py` (rel=3): Streaming utilities and sink abstractions for handling incremental LLM output: StreamChunk, abstract StreamSink, concrete sinks (FileSink, JSONLSink, QueueSink, CallbackSink), MultiSink, BufferedSink, and a StreamProcessor. Supports writing streaming chunks to multiple destinations, buffering, and simple processing workflows.
+- `src/azure_llm_toolkit/sync_client.py` (rel=4): Synchronous wrapper that runs the async AzureLLMClient in a managed event loop (or spawns a thread when already in an event loop). Provides blocking equivalents for embeddings and chat completions, token counting utilities, and preserves feature parity for non-async codebases.
+- `src/azure_llm_toolkit/tools.py` (rel=4): Function-calling / tools subsystem providing definitions, automatic Python-function-to-API-schema conversion, a tool registry, and execution plumbing. Main abstractions are ParameterProperty, FunctionDefinition, ToolCall/ToolCallResult, and ToolRegistry with sync/async handler support and a @tool decorator for easy registration. It equips the client/agents with tools, handles argument parsing, error reporting, and exposes API-compatible function definitions.
+- `src/azure_llm_toolkit/types.py` (rel=5): Lightweight dataclasses describing shared domain types: UsageInfo (token breakdown and parsing helpers), CostInfo, ChatCompletionResult, and EmbeddingResult. These structured types standardize API returns and make cost/usage tracking explicit across the toolkit.
+- `src/azure_llm_toolkit/validation.py` (rel=4): Structured output helpers using Pydantic: generate JSON schemas from models, create extraction prompts, parse JSON robustly from model text, and chat_completion_structured which requests JSON output, parses and validates it with retries on parse/validation failures. Also includes convenience extract_structured_data and a manager for caching/batching structured outputs.
 
 ### tests
 
-Test suite root for the project. The presence of an `integration/` subdirectory suggests a structure that separates quick-running tests from environment-dependent integration tests.
-
-**Files:**
-
-- `tests/__init__.py` : (no summary)
-- `tests/conftest.py` : (no summary)
-- `tests/manual_test_max_tokens_vs_max_completion.py` : (no summary)
-- `tests/test_batch_embedder.py` : (no summary)
-- `tests/test_batch_runner.py` : (no summary)
-- `tests/test_cache.py` : (no summary)
-- `tests/test_client.py` : (no summary)
-- `tests/test_live_rate_limits.py` : (no summary)
-- `tests/test_max_tokens_vs_max_completion.py` : (no summary)
-- `tests/test_rate_limiter_integration.py` : (no summary)
-- `tests/test_reranker.py` : (no summary)
-- `tests/test_reranker_rate_limit_stress.py` : (no summary)
-- `tests/test_validation.py` : (no summary)
+Comprehensive pytest suite and shared fixtures (conftest.py) used across unit and integration tests. Covers structured-output validation, rate limiter behavior and concurrency, reranker correctness and stress tests, GPT-5 parameter conversion logic, batch API and runner behavior, caching semantics, and other client-level behaviors; conftest includes autouse logic to skip Azure-dependent tests when credentials are absent.
 
 #### tests/integration
+
+High-level integration tests. test_end_to_end.py runs orchestrations (ConversationManager, batch runners, StructuredOutputManager) using a monkeypatched AzureLLMClient to validate end-to-end behavior without network calls; test_live_batch_api_client.py contains guarded live tests exercising Azure Batch API flows and BatchQuotaMonitor against real endpoints when credentials are available.
+
 **Files:**
 
-- `tests/integration/test_end_to_end.py` : (no summary)
+- `tests/integration/test_end_to_end.py` (rel=3): High-level integration-style tests that monkeypatch AzureLLMClient to exercise ConversationManager, batch runners, StructuredOutputManager and other orchestrations end-to-end without network calls. Validates component composition and workflow correctness in integration scenarios.
+- `tests/integration/test_live_batch_api_client.py` (rel=2): Live integration tests for AzureBatchAPIClient that exercise end-to-end batch embedding flows against real Azure endpoints (create -> wait -> retrieve, cancel), and BatchQuotaMonitor; guarded by environment checks due to real cost and latency. Useful for CI/acceptance runs with credentials.
+
+**Files:**
+
+- `tests/conftest.py` (rel=4): Pytest fixtures and shared test setup: loads .env, provides fixtures for AzureConfig, AzureLLMClient variants, PolarsBatchEmbedder, sample texts/messages, and an autouse fixture that skips tests when Azure credentials are missing. Central to test environment consistency across unit/integration tests.
+- `tests/test_batch_api.py` (rel=3): Tests for MockBatchAPIClient and PolarsBatchEmbedder integration: verifies mock job lifecycle, embedding shapes, batch API usage by the embedder, and that the embedder calls rate limiter appropriately. Supports batch-path correctness and embedder-batch integration.
+- `tests/test_batch_api_client.py` (rel=3): Unit tests for AzureBatchAPIClient and BatchQuotaMonitor using dummy files/batches clients to validate create/status/result/cancel flows and wait/poll logic, plus quota feasibility checks. Ensures batch API adapter behaves as the embedder expects.
+- `tests/test_batch_runner.py` (rel=3): Unit tests for batch runner utilities (ChatBatchRunner and EmbeddingBatchRunner) using a DummyAzureLLMClient: validates ordering, success/failure handling, progress callback behavior, batching semantics, and error propagation for both chat and embedding batch workflows.
+- `tests/test_cache.py` (rel=3): Unit tests for caching functionality: EmbeddingCache, ChatCache, and CacheManager behaviors including set/get, batch operations, misses, model separation, clearing, stats, disabled mode, and file persistence. Validates deterministic cache semantics used to reduce API calls.
+- `tests/test_gpt5_parameter_conversion.py` (rel=4): Unit tests covering automatic GPT-5 parameter conversion logic: ensures max_tokens -> max_completion_tokens conversion, removal of temperature, case-insensitive model detection, preservation of unrelated parameters, and that the conversion is applied to both chat_completion and streaming APIs with appropriate warnings and no mutation of original kwargs.
+- `tests/test_max_tokens_vs_max_completion.py` (rel=3): Informational/integration test that probes behavior of `max_tokens` vs `max_completion_tokens` for GPT-4o and GPT-5-mini deployments using real AzureOpenAI client; prints outcomes rather than asserting. Useful for understanding parameter compatibility across API versions.
+- `tests/test_rate_limiter_integration.py` (rel=4): Integration-style tests validating RateLimiter and RateLimiterPool behavior under RPM/TPM constraints and concurrency. Simulates bursts and token-heavy requests to assert delays, bucket refill behavior, and per-model limiter statistics; important for verifying throttling correctness.
+- `tests/test_reranker.py` (rel=4): (Duplicate path already summarized) Comprehensive unit tests for the logprob-based reranker including utilities, config, scoring, and reranking. Ensures reranker correctness and resilience.
+- `tests/test_reranker_rate_limit_stress.py` (rel=3): Stress tests for reranker integration with rate limiting: mocks OpenAI client responses and exercises LogprobReranker under TPM/RPM pressure to ensure throttling and correct stat collection. Focuses on realistic token usage and rate-limiter interactions for reranking pipelines.
+- `tests/test_validation.py` (rel=4): Unit tests for structured output/validation utilities: JSON schema generation from Pydantic models, extraction prompt creation, robust JSON parsing, structured chat completion with retry behavior, and StructuredOutputManager caching. Uses a DummyClient to mock chat responses and asserts validation and retry semantics.
+
+**Files:**
+
+- `CHANGELOG.md` (rel=4): Project changelog documenting releases, notable features, breaking changes, and migration notes (v0.2.3 adds GPT-5 parameter conversion and warnings; v0.2.0 changed default timeout to infinite and improved logging). It provides a chronological trace of architecture- and UX-impacting changes used for release planning and user guidance.
+- `CONTRIBUTING.md` (rel=3): Guidelines for contributing: development setup, branch naming, testing and CI expectations, code style (PEP8, typing, docstrings), commit/PR conventions, and release process. Useful for maintainers and contributors to align with repository workflows.
+- `README.md` (rel=5): Primary user-facing documentation that describes the toolkit purpose, top-level API surface (AzureConfig, AzureLLMClient, PolarsBatchEmbedder, rate limiters, caches, rerankers, etc.), configuration options, quick start examples, GPT-5 parameter conversion behavior, caching, batching, and links to examples and demos. Serves as the canonical onboarding and architecture overview for users and integrators.
+- `pyproject.toml` (rel=2): Project packaging and tooling configuration: project metadata (name=azure-llm-toolkit, version 0.2.3), dependencies, optional dev dependencies, build backend (hatchling), ruff/mypy/pytest settings, and wheel packaging target. Central for builds, dependency management, and developer tooling.
+- `show_metrics.py` (rel=2): Utility script that queries a local Prometheus server and prints aggregated Azure LLM metrics (requests, RPM, token usage, TPM, cost) for quick operational inspection. Helpful for operators monitoring the toolkit metrics export.
 
 
 ## Summary Statistics
-
-- Total files in repository: 71
-- Total textual files scanned: 70
-- Files included after budget/filter: 70
+- Generated at: 2026-02-13 13:28:45 UTC
+- Total files in repository: 82
+- Total textual files scanned: 82
+- Files included after budget/filter: 71
 - Strategy (comprehension level): comprehensive
-- Batches executed: 1
-- Avg estimated tokens per batch: 152_969
-- Model (generation): gpt-5.2
-- Token budget (input): 400_000
-- Summary token count: 1_824
+- Batches executed: 2
+- Avg estimated tokens per batch: 90_075
+- Model (generation): gpt-5-mini
+- Token budget (input): 270_000
+- Summary token count: 6_395
 
 ## Summary Cost Analysis
 
-- Total tokens processed: 1,591
-  - Input tokens (sent to API): 427
+- Total tokens processed: 201750
+  - Input tokens (sent to API): 186615
   - API cached tokens (prompt cache): 0
-  - Output tokens: 1,164
+  - Output tokens: 15135
   - Local cached tokens (files not sent): 0
 - Local cache: 0 files skipped
-- Actual cost (with all caching): kr0.125
-- Cost without any cache: kr0.125
-- Total savings: kr0.0000
-  - API cache savings: kr0.0000
-  - Local cache savings: kr0.0000
+- Actual cost (with all caching): 0.7723144499999999
+- Cost without any cache: 0.7723144499999999
+- Total savings: 0.0
+  - API cache savings: 0.0
+  - Local cache savings: 0.0

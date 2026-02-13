@@ -75,6 +75,33 @@ def _log_retry_attempt(retry_state):
     )
 
 
+def _extract_text_from_content(content: Any) -> str:
+    """
+    Extract text from message content for token counting.
+
+    Handles both simple string content and vision messages with image parts.
+
+    Args:
+        content: Message content (string or list of content parts)
+
+    Returns:
+        Extracted text string
+    """
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        # Vision message format: [{"type": "text", "text": "..."}, {"type": "image_url", ...}]
+        text_parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+        return " ".join(text_parts)
+
+    # Fallback for unexpected formats
+    return ""
+
+
 def _prepare_gpt5_kwargs(kwargs: dict[str, Any], model: str) -> dict[str, Any]:
     """
     Prepare API kwargs for GPT-5 models by converting incompatible parameters.
@@ -342,7 +369,7 @@ class AzureLLMClient:
     )
     async def chat_completion(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         system_prompt: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
@@ -408,7 +435,7 @@ class AzureLLMClient:
 
     async def _chat_completion_impl(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         system_prompt: str | None,
         model: str,
         temperature: float | None,
@@ -423,7 +450,7 @@ class AzureLLMClient:
     ) -> ChatCompletionResult:
         """Internal implementation of chat_completion."""
         # Build messages
-        full_messages: list[dict[str, str]] = []
+        full_messages: list[dict[str, Any]] = []
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})
         full_messages.extend(messages)
@@ -448,7 +475,9 @@ class AzureLLMClient:
 
         # Estimate tokens for rate limiting
         if self.enable_rate_limiting and self.rate_limiter_pool:
-            estimated_input_tokens = sum(self.config.count_tokens(m.get("content", "")) for m in full_messages)
+            estimated_input_tokens = sum(
+                self.config.count_tokens(_extract_text_from_content(m.get("content", ""))) for m in full_messages
+            )
             estimated_output_tokens = max_tokens or 1000  # Conservative estimate
             estimated_total = estimated_input_tokens + estimated_output_tokens
 
@@ -643,7 +672,7 @@ class AzureLLMClient:
 
     async def chat_completion_stream(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         system_prompt: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
@@ -676,7 +705,7 @@ class AzureLLMClient:
         model = model or self.config.chat_deployment
 
         # Build messages
-        full_messages: list[dict[str, str]] = []
+        full_messages: list[dict[str, Any]] = []
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})
         full_messages.extend(messages)
@@ -734,9 +763,11 @@ class AzureLLMClient:
         """
         return self.config.count_tokens(text)
 
-    def count_message_tokens(self, messages: list[dict[str, str]]) -> int:
+    def count_message_tokens(self, messages: list[dict[str, Any]]) -> int:
         """
         Count tokens in a list of messages.
+
+        Supports both simple text messages and vision messages with images.
 
         Args:
             messages: List of message dicts
@@ -744,15 +775,7 @@ class AzureLLMClient:
         Returns:
             Total number of tokens
         """
-        # Approximate token count for messages
-        # Format: <role>: <content> with some overhead
-        total = 0
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            # Add tokens for role, content, and formatting
-            total += self.count_tokens(f"{role}: {content}") + 4
-        return total
+        return sum(self.config.count_tokens(_extract_text_from_content(m.get("content", ""))) for m in messages)
 
     # ==================== Utilities ====================
 
@@ -775,7 +798,7 @@ class AzureLLMClient:
 
     def estimate_chat_cost(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         estimated_output_tokens: int = 500,
         model: str | None = None,
     ) -> float:
